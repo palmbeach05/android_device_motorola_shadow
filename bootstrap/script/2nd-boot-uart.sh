@@ -1,7 +1,7 @@
 #!/sbin/sh
 
 ######## BootMenu Script
-######## Execute [2nd-boot] Menu
+######## Execute [2nd-init] Menu
 
 source /system/bootmenu/script/_config.sh
 
