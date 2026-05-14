@@ -128,8 +128,7 @@ public class BpPanicHandlerService extends Service {
 
     private void doReboot(boolean requireNotice) {
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-
         mPrefs.edit().putBoolean(KEY_NEED_REBOOT_NOTICE, requireNotice).commit();
-        pm.reboot(null);
+        pm.reboot("2nd-boot");
     }
 }

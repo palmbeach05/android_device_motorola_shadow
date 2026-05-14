@@ -1,4 +1,4 @@
-# Copyright (C) 2011 The Android Open Source Project
+# Copyright (C) 2008 The Android Open Source Project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,30 +21,23 @@ ifneq ($(TARGET_SIMULATOR),true)
 # hw/<SENSORS_HARDWARE_MODULE_ID>.<ro.product.board>.so
 include $(CLEAR_VARS)
 
-LOCAL_MODULE := sensors.$(TARGET_BOOTLOADER_BOARD_NAME)
+LOCAL_MODULE := sensors.shadow
 
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/hw
 
-LOCAL_MODULE_TAGS:= eng debug
+LOCAL_MODULE_TAGS := optional
 
 LOCAL_CFLAGS := -DLOG_TAG=\"Sensors\"
-
-LOCAL_SRC_FILES := \
-	sensors.c \
-	nusensors.cpp \
-	InputEventReader.cpp \
-	SensorBase.cpp
-
-LOCAL_SRC_FILES +=  SensorKXTF9.cpp
-LOCAL_SRC_FILES +=  SensorAK8973.cpp
-
-ifneq ($(BOARD_DEFY_MODEL),DEFY_FROYO)
-LOCAL_CFLAGS += -DDEFYPLUS
-LOCAL_SRC_FILES += SensorISL29030Combined.cpp
-else
-LOCAL_SRC_FILES += SensorISL29030Separate.cpp
-endif
-
+LOCAL_SRC_FILES := 						\
+				sensors.c 				\
+				nusensors.cpp 			\
+				InputEventReader.cpp	\
+				SensorBase.cpp			\
+				LightSensor.cpp			\
+				ProximitySensor.cpp		\
+				AkmSensor.cpp \
+				Kxtf9.cpp
+				
 LOCAL_SHARED_LIBRARIES := liblog libcutils
 LOCAL_PRELINK_MODULE := false
 

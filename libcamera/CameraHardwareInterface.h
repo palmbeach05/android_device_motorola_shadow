@@ -19,14 +19,11 @@
 
 #include <binder/IMemory.h>
 #include <utils/RefBase.h>
-#include <utils/threads.h>
 #include <camera/Camera.h>
 #include <camera/CameraParameters.h>
 #include <camera/Overlay.h>
 
 namespace android {
-
-static Mutex mSentFramesLock;
 
 /**
  *  The size of image for display.

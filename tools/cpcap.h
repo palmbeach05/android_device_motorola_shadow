@@ -8,7 +8,7 @@
     return 1; \
   }
 
-struct cpcap_batt_data_mb525 {
+struct cpcap_batt_data_mb810 {
     int status;
     int health;
     int present;

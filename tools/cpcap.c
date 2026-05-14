@@ -81,7 +81,7 @@ int read_batt_ps() {
 
     int ret;
 #ifdef OMAP_COMPAT
-    struct cpcap_batt_data_mb525 batt_state;
+    struct cpcap_batt_data_mb810 batt_state;
 #else
     struct cpcap_batt_data batt_state;
 #endif

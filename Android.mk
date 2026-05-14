@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-ifneq ($(filter mb52x,$(TARGET_DEVICE)),)
+ifeq ($(TARGET_USE_SHADOW_COMMON),true)
 include $(all-subdir-makefiles)
 endif
 
