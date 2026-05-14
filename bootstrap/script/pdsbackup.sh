@@ -9,55 +9,48 @@
 
 export PATH=/system/xbin:$PATH
 PDS_FILE=/data/pdsdata.img
+BB_STATIC="/system/bootstrap/binary/busybox"
 
 mount_pds_image() {
-    mkdir -p /pds
-    umount /pds 2>/dev/null
-    losetup -d /dev/block/loop7 2>/dev/null
-    losetup /dev/block/loop7 $PDS_FILE
-    busybox mount -o rw,nosuid,nodev,noatime,nodiratime,barrier=1 /dev/block/loop7 /pds
+	mkdir -p /pds
+	umount /pds 2>/dev/null
+	LOOP_DEV=$($BB_STATIC losetup -f)
+	$BB_STATIC losetup $LOOP_DEV $PDS_FILE
+	$BB_STATIC mount -o rw,nosuid,nodev,noatime,nodiratime,barrier=1 $LOOP_DEV /pds
+	echo "PDS mounted on $LOOP_DEV"
 }
 
 if [ -f /data/pds.img ]; then
-    #delete old pds image that may have broken permissions
-    rm -f /data/pds.img
+	#delete old pds image that may have broken permissions
+	rm -f /data/pds.img
 fi
 
 if [ ! -f $PDS_FILE ] ; then
-    #make a copy of pds in /data
-    dd if=/dev/block/mmcblk1p7 of=$PDS_FILE bs=4096
+	#make a copy of pds in /data
+	dd if=/dev/block/mmcblk1p7 of=$PDS_FILE bs=4096
 
-    #mount the fake pds
-    mount_pds_image
+	#mount the fake pds
+	mount_pds_image
 
-    cd /pds
-    #find and change moto users first
-    busybox find -user 9000 -exec chown 1000 {} \;
-    busybox find -user 9003 -exec chown 1000 {} \;
-    busybox find -user 9004 -exec chown 1000 {} \;
-    busybox find -user 9007 -exec chown 1000 {} \;
+	cd /pds
+	#find and change moto users and groups
+	$BB_STATIC find /pds -user 9000 -o -user 9003 -o -user 9004 -o -user 9007 -exec chown 1000 {} \;
+	$BB_STATIC find /pds -group 9000 -o -group 9003 -o -group 9004 -o -group 9007 -o -group 9009 -exec chgrp 1000 {} \;
 
-    #find and change moto groups
-    busybox find -group 9000 -exec chgrp 1000 {} \;
-    busybox find -group 9003 -exec chgrp 1000 {} \;
-    busybox find -group 9004 -exec chgrp 1000 {} \;
-    busybox find -group 9007 -exec chgrp 1000 {} \;
-    busybox find -group 9009 -exec chgrp 1000 {} \;
+	echo "PDS Backed up, permissions fixed and mounted"
 
-    echo "PDS Backed up, permissions fixed and mounted"
-
-    if [ -d /data/battd ] ; then
-        cd /data/battd
-        busybox find -user 9000 -exec chown 1000 {} \;
-        busybox find -group 9000 -exec chgrp 1000 {} \;
-    fi
+	if [ -d /data/battd ] ; then
+		cd /data/battd
+		$BB_STATIC find -user 9000 -exec chown 1000 {} \;
+		$BB_STATIC find -group 9000 -exec chgrp 1000 {} \;
+	fi
 
 else
 
-    #mount the existing pds backup
-    mount_pds_image
+	#mount the existing pds backup
+	mount_pds_image
 
-    if [ -d /pds/public ] ; then
-        echo "PDS partition mounted from data image."
-    fi
+	if [ -d /pds/public ] ; then
+		echo "PDS partition mounted from data image."
+	fi
 fi

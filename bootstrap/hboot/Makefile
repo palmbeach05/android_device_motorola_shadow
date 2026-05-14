@@ -6,10 +6,10 @@ CC := $(CROSS_COMPILE)gcc
 LD := $(CROSS_COMPILE)ld
 OBJCOPY := $(CROSS_COMPILE)objcopy
 
-EXTRA_CFLAGS ?= -DBOARD_CDMA_SHADOW .
+EXTRA_CFLAGS ?= -DBOARD_CDMA_SHADOW
 CFLAGS := -Os -Wall -Wno-return-type -Wno-main -fno-builtin -fno-stack-protector -march=armv7-a -ffunction-sections -fPIC $(EXTRA_CFLAGS)
 AFLAGS := -D__ASSEMBLY__ -fno-builtin -march=armv7-a -ffunction-sections
-LDFLAGS := -static -nostdlib --gc-sections 
+LDFLAGS := -static -nostdlib --gc-sections
 
 LIBGCC := -L $(shell dirname `$(CC) $(CFLAGS) -print-libgcc-file-name`) -lgcc
 
