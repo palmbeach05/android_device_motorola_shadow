@@ -85,7 +85,7 @@
         <item>"default"</item>
         <item>"dun"</item>
         <item>"mms"</item>
-        <item>"supl</item>
+        <item>"supl"</item>
     </string-array>
 
     <!-- List of regexpressions describing the interface (if any) that represent tetherable
@@ -247,6 +247,7 @@
          Bluetooth Module 
     <bool name="config_bluetooth_adapter_quick_switch">false</bool>  -->
 
+    <add-resource type="bool" name="config_fmSeparateVolumeControl" />
     <bool name="config_fmSeparateVolumeControl">true</bool>
 
     <!-- If this is true, the screen will fade off. -->
@@ -261,7 +262,7 @@
     <!-- Boolean indicating whether the wifi chipset has dual frequency band support -->
     <bool translatable="false" name="config_wifi_dual_band_support">false</bool>
 
-    <!-- Boolean indicating whether the wifi chipset hasnfig_ui_enableF background scan support -->
+    <!-- Boolean indicating whether the wifi chipset hasnfig_ui_enabled background scan support -->
     <bool translatable="false" name="config_wifi_background_scan_support">false</bool>
 
     <!-- Boolean indicating if restoring network selection should be skipped -->
@@ -279,6 +280,7 @@
     <!-- Boolean indicating if current platform supports bluetooth wide band speech -->
     <bool name="config_bluetooth_wide_band_speech">false</bool>
 
+    <add-resource type="bool" name="config_ui_enableFadingMarquee" />
     <bool name="config_ui_enableFadingMarquee">false</bool>
 
     <!-- If this is true, the screen will come on when you unplug usb/power/whatever. -->
