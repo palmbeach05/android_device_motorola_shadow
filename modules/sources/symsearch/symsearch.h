@@ -23,14 +23,16 @@
 #ifndef _SYMSEARCH_H_
 #define _SYMSEARCH_H_
 
-//macros to call functions declared in C but addressed manually
+#include <linux/types.h>
+#include <linux/errno.h>
 
-//ret -> return type
-//name -> function name
-//... parameter list
-//expname -> name under which the function is exported
+// Function pointer type for the lookup engine
+typedef unsigned long (*lookup_symbol_address_fp)(const char *name);
 
-//addresses
+// Declare the lookup function as an extern (exported by symsearch.ko)
+extern lookup_symbol_address_fp lookup_symbol_address;
+
+/* --- ADDRESS MACROS --- */
 
 #define SYMSEARCH_DECLARE_ADDRESS(name) \
 	extern unsigned long name##_address
@@ -44,93 +46,50 @@
 #define SYMSEARCH_GET_ADDRESS(name) \
 	name##_address
 
-//functions
+/* --- FUNCTION MACROS --- */
 
-#define SYMSEARCH_DECLARE_FUNCTION(ret,name,...) \
-	typedef	ret (*name##_fp) ( __VA_ARGS__ ); \
+#define SYMSEARCH_DECLARE_FUNCTION(ret, name, ...) \
+	typedef ret (*name##_fp)(__VA_ARGS__); \
 	extern name##_fp name
 
-#define SYMSEARCH_DECLARE_FUNCTION_STATIC(ret,name,...) \
-	typedef	ret (*name##_fp) ( __VA_ARGS__ ); \
+#define SYMSEARCH_DECLARE_FUNCTION_STATIC(ret, name, ...) \
+	typedef ret (*name##_fp)(__VA_ARGS__); \
 	static name##_fp name = 0
 
 #define SYMSEARCH_INIT_FUNCTION(name) \
 	name##_fp name = (name##_fp)0
 
-//binding (call this in module_init and module is the module name)
+/* --- BINDING MACROS --- */
 
-#define SYMSEARCH_BIND_ADDRESS(module,name) \
-	name##_address = lookup_symbol_address(#name); \
-	if(!name##_address) \
-	{ \
-		printk(KERN_INFO #module ": Could not find symbol: " #name ".\n"); \
-		return -EBUSY; \
+/* 
+ * NOTE: Using -ENODEV or -ENOENT is often more descriptive than -EBUSY 
+ * for missing symbols in modern Android debugging.
+ */
+
+#define SYMSEARCH_BIND_FUNCTION_TO(module, name, sym) \
+	if (lookup_symbol_address) { \
+		sym = (sym##_fp)lookup_symbol_address(#name); \
+	} \
+	if (!sym) { \
+		printk(KERN_ERR #module ": Could not find symbol: " #name "\n"); \
+		return -ENODEV; \
 	}
 
-#define SYMSEARCH_BIND_ADDRESS_TO(module,name,sym) \
-	sym##_address = lookup_symbol_address(#name); \
-	if(!sym##_address) \
-	{ \
-		printk(KERN_INFO #module ": Could not find symbol: " #name ".\n"); \
-		return -EBUSY; \
-	}
-
-#define SYMSEARCH_BIND_FUNCTION(module,name) \
-	name = (name##_fp)lookup_symbol_address(#name); \
-	if(!name) \
-	{ \
-		printk(KERN_INFO #module ": Could not find symbol: " #name ".\n"); \
-		return -EBUSY; \
-	}
-
-#define SYMSEARCH_BIND_FUNCTION_NORET(module,name) \
-	name = (name##_fp)lookup_symbol_address(#name); \
-	if(!name) \
-	{ \
-		printk(KERN_INFO #module ": Could not find symbol: " #name ".\n"); \
+#define SYMSEARCH_BIND_FUNCTION_TO_NORET(module, name, sym) \
+	if (lookup_symbol_address) { \
+		sym = (sym##_fp)lookup_symbol_address(#name); \
+	} \
+	if (!sym) { \
+		printk(KERN_ERR #module ": Could not find symbol: " #name "\n"); \
 		return; \
 	}
 
-#define SYMSEARCH_BIND_FUNCTION_TO(module,name,sym) \
-	sym = (sym##_fp)lookup_symbol_address(#name); \
-	if(!sym) \
-	{ \
-		printk(KERN_INFO #module ": Could not find symbol: " #name ".\n"); \
-		return -EBUSY; \
-	}
-
-#define SYMSEARCH_BIND_FUNCTION_TO_TYPED(module,type,name,sym) \
-	sym = (sym##_fp)lookup_symbol_address(#name); \
-	if(!sym) \
-	{ \
-		printk(KERN_INFO #module ": Could not find symbol: " #name ".\n"); \
-		return (type) -ENXIO; \
-	}
-
-#define SYMSEARCH_BIND_FUNCTION_TO_NORET(module,name,sym) \
-	sym = (sym##_fp)lookup_symbol_address(#name); \
-	if(!sym) \
-	{ \
-		printk(KERN_INFO #module ": Could not find symbol: " #name ".\n"); \
-		return; \
-	}
-
-//hijacking function
-//injects a Branch instruction to the function beginning
-
-//ARM MODE only !!!
-
-struct hijack_info
-{
+/* --- LEGACY HIJACKING STRUCTURE --- */
+/* (Keeping this for compatibility, though we use hook_info now) */
+struct hijack_info {
 	unsigned long hijack_address;
 	unsigned long redirection_address;
 	unsigned long instruction_backup;
 };
 
-SYMSEARCH_DECLARE_FUNCTION(unsigned long, lookup_symbol_address, const char *name);
-
-struct hijack_info hijack_function(unsigned long hijack_address, unsigned long redirection_address);
-void restore_function(struct hijack_info hijack);
-
-#endif
-
+#endif /* _SYMSEARCH_H_ */

@@ -31,46 +31,50 @@
 #include <linux/string.h>
 #include "symsearch.h"
 
-extern int
-kallsyms_on_each_symbol(int (*fn)(void *, const char *, struct module *,
-				      unsigned long),
-			    void *data);
+/* 
+ * We use kallsyms_on_each_symbol (which is exported by the kernel)
+ * to find the address of kallsyms_lookup_name (which is NOT exported).
+ */
+extern int kallsyms_on_each_symbol(int (*fn)(void *, const char *, struct module *,
+			unsigned long), void *data);
 
-SYMSEARCH_INIT_FUNCTION(lookup_symbol_address);
+// Define the function pointer and export it
+unsigned long (*lookup_symbol_address)(const char *name) = NULL;
 EXPORT_SYMBOL(lookup_symbol_address);
 
-static int
-find_kallsyms_lookup_name(void* data, const char* name,
-                          struct module * module, unsigned long address)
+static int find_kallsyms_lookup_name(void* data, const char* name,
+			struct module * module, unsigned long address)
 {
-	//kallsyms_lookup_name is our friend
 	if (!strcmp(name, "kallsyms_lookup_name"))
 	{
-		printk(KERN_INFO "symsearch: found kallsyms_lookup_name on 0x%lx.\n", address);
-		lookup_symbol_address = (lookup_symbol_address_fp)address;
-		return 1;
+		printk(KERN_INFO "symsearch: found kallsyms_lookup_name at 0x%lx.\n", address);
+		lookup_symbol_address = (void *)address;
+		return 1; // Stop searching
 	}
-
 	return 0;
 }
 
-static int __init
-symsearch_init(void)
+static int __init symsearch_init(void)
 {
-	//kallsyms export the kallsyms_on_each_symbol so use that
 	kallsyms_on_each_symbol(&find_kallsyms_lookup_name, NULL);
+    
 	if(!lookup_symbol_address)
 	{
-		printk(KERN_INFO "symsearch: could not find kallsyms_lookup_name.\n");
-		return -EBUSY;
+		printk(KERN_ERR "symsearch: CRITICAL - could not find kallsyms_lookup_name.\n");
+		return -ENODEV;
 	}
 	return 0;
+}
+
+static void __exit symsearch_exit(void)
+{
+	printk(KERN_INFO "symsearch: unloaded.\n");
 }
 
 module_init(symsearch_init);
-MODULE_ALIAS("symsearch");
-MODULE_VERSION("1.1");
-MODULE_AUTHOR("Skrilax_CZ, verified by CyanogenDefy");
-MODULE_DESCRIPTION("symsearch - lookup kernel symbols helper to fix signed kernel features");
-MODULE_LICENSE("GPL");
+module_exit(symsearch_exit);
 
+MODULE_VERSION("1.2");
+MODULE_AUTHOR("Skrilax_CZ, palmbeach05");
+MODULE_DESCRIPTION("Helper to find unexported kernel symbols");
+MODULE_LICENSE("GPL");

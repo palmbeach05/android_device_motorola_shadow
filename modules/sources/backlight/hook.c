@@ -24,13 +24,12 @@
 #include "../symsearch/symsearch.h"
 #include <linux/module.h>
 #include <linux/kallsyms.h>
-#include <linux/smp_lock.h>
+#include <linux/stop_machine.h>
+#include <asm/cacheflush.h>
 
-//FIX ME (dynamic module name)
 #define MODULE_NAME "backlight"
 #define MODULE_TAG backlight
 
-//#define DEBUG_HOOK
 #ifdef DEBUG_HOOK
 #define P(format, ...) printk(KERN_INFO "hook: " format, ## __VA_ARGS__)
 #else
@@ -42,20 +41,19 @@
 SYMSEARCH_DECLARE_FUNCTION_STATIC(unsigned long, pkallsyms_lookup_name, const char *);
 SYMSEARCH_DECLARE_FUNCTION_STATIC(const char *, pkallsyms_lookup, unsigned long, unsigned long *, unsigned long *, char **, char *);
 
-/* Only ARM is supported and the target will crash if there involves
-   PC related addressing in the first instruction. Because that
-   instruction will be moved to hook_info for execution.
-*/
+/* 
+ * ARM Instruction Patching 
+ */
 int hook(struct hook_info *hi) {
 	char targetName[KSYM_NAME_LEN];
 	char *ptargetName;
-	if ( !hi->target ) {
-		if ( hi->targetName ) {
+
+	if (!hi->target) {
+		if (hi->targetName) {
 			hi->target = (unsigned int*)pkallsyms_lookup_name(hi->targetName);
 		}
-		if ( !hi->target ) {
-			P("Target address is not defined and targetName(%s) cannot be found.\n", 
-				hi->targetName ? hi->targetName : "");
+			if (!hi->target) {
+				P("Target address not found for %s\n", hi->targetName ? hi->targetName : "NULL");
 			return -1;
 		}
 		ptargetName = hi->targetName;
@@ -64,50 +62,70 @@ int hook(struct hook_info *hi) {
 		ptargetName = targetName;
 	}
 
-	// Save the first 2 instructions from target.
 	P("target = %p(%s), newf = %x\n", hi->target, ptargetName, hi->newfunc);
-	P("*target = %x\n", hi->target[0]);
+    
+	// Save the original instruction
 	hi->asm0 = hi->target[0];
 
-	// Use 1 instruction static replacement.
+	/* 
+	 * Use 1 instruction static replacement (Branch instruction)
+	 * We calculate the relative offset for the ARM 'B' instruction.
+	 */
 	hi->target[0] = 0xea000000 + (0xffffff & (hi->newfunc - ((unsigned int)hi->target + 8)) / 4);
-	P("*target = %x\n", hi->target[0]);
 
-	// Setup jmp table to first non-overwritten offset.
-	hi->jmp = 0xe51ff004;
-	hi->target_cont = hi->target+1;
-	P("&invoke = %p, target_cont = %p\n", &hi->asm0, hi->target_cont);
+	/*
+	 * CRITICAL: Flush the Instruction Cache.
+	 * Data was written to the D-Cache, but the CPU executes from the I-Cache.
+	 * Without this, the CPU might execute the old instructions.
+	 */
+	flush_icache_range((unsigned long)hi->target, (unsigned long)hi->target + 4);
 
-	INFO("hooked %s\n", ptargetName);
+	// Setup jump table for the original function continuation
+	hi->jmp = 0xe51ff004; // LDR PC, [PC, #-4]
+	hi->target_cont = hi->target + 1;
+
+	INFO("hooked %s at %p\n", ptargetName, hi->target);
 	return 0;
 }
 
 int unhook(struct hook_info *hi) {
-	if ( hi->target ) {
-		// Restore the first 2 instructions to target.
+	if (hi->target) {
 		hi->target[0] = hi->asm0;
+		// Flush again after restoring original code
+		flush_icache_range((unsigned long)hi->target, (unsigned long)hi->target + 4);
 		INFO("unhooked %p\n", hi->target);
 	}
 	return 0;
 }
 
+/*
+ * Use stop_machine or preemption disabling instead of the old BKL (lock_kernel)
+ */
 int hook_init(void) {
 	int i;
 	SYMSEARCH_BIND_FUNCTION_TO(backlight, kallsyms_lookup_name, pkallsyms_lookup_name);
 	SYMSEARCH_BIND_FUNCTION_TO(backlight, kallsyms_lookup, pkallsyms_lookup);
-	lock_kernel();
+
+	if (!pkallsyms_lookup_name || !pkallsyms_lookup) {
+		printk(KERN_ERR MODULE_NAME ": Symsearch failed to bind kallsyms functions!\n");
+		return -ENODEV;
+	}
+
+	// Disable preemption to ensure atomic patching
+	preempt_disable();
 	for (i = 0; g_hi[i].newfunc; ++i) {
 		hook(&g_hi[i]);
 	}
-	unlock_kernel();
+	preempt_enable();
+    
 	return 0;
 }
 
 void hook_exit(void) {
 	int i;
-	lock_kernel();
+	preempt_disable();
 	for (i = 0; g_hi[i].newfunc; ++i) {
 		unhook(&g_hi[i]);
 	}
-	unlock_kernel();
+	preempt_enable();
 }

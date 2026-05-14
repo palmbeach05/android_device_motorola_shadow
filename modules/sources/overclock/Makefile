@@ -6,7 +6,7 @@
 #sio_iosched-objs = sio-iosched.o
 #obj-m += sio_iosched.o
 
-ccflags-y += -DSMARTREFLEX -DOMAP36XX
+ccflags-y += -DSMARTREFLEX -DOMAP36XX -DEXPORT
 overclock_defy-objs := overclock.o
 obj-m += overclock_defy.o
 obj-m += cpufreq_stats.o

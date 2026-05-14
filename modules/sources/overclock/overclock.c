@@ -1,150 +1,145 @@
 /*
-	Motorola OMAP3 overclock module
-	version 1.4.9 - 2011-03-20
-	by Tiago Sousa <mirage@kaotik.org>
-	License: GNU GPLv2
-	<http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>
-
-	Project site:
-	http://code.google.com/p/milestone-overclock/
-
-	Changelog:
-
-	version 1.4.9 - 2012-05-31 (CyanogenDefy)
-	- printk level tuneup, add Defy in Description
-	  restore original max rate/vsel on module unload
-	version 1.4.8 - 2011-03-20
-	- build process for motorola milestone 2.2
-	version 1.4.7 - 2011-01-16
-	- added sr_adjust_vsel field when reading the mpu_opps table if
-	  SMARTREFLEX is enabled (thanks tekahuna)
-	version 1.4.6.1 - 2010-12-17
-	- rolled back the address detection, needs more testing
-	version 1.4.6 - 2010-12-16
-	- automatic detection of omap2_clk_init_cpufreq_table_addr and
-	  cpufreq_stats_update_addr in most 2.6.32 kernels (by Skrilax_CZ and
-	  kabaldan)
-	- build process for motorola flipout, samsung galaxy a and archos
-	  tablets a70/a101
-	version 1.4.5 - 2010-12-09
-	- build process for motorola defy
-	version 1.4.4 - 2010-10-28
-	- build process for milestone leaked 2.6.32 and droid 2.2
-	version 1.4.3 - 2010-10-25
-	- build process for droid x 2.2
-	- fix vsel setting for droid x 2.x and others (thanks to kabaldan
-	  for hinting at this; the struct omap_opp changed to support "smart
-	  reflex class 1.5" technology)
-	- remove call to omap_pm_cpu_get_freq() because it's no longer
-	  exported in froyo (thanks tekahuna)
-	version 1.4.2 - 2010-08-31
-	- build process for samsung galaxy beam
-	version 1.4.1 - 2010-08-30
-	- change cpufreq stats when writing to /proc/overclock/freq_table
-	version 1.4 - 2010-08-16
-	- support kernel 2.6.32 (android froyo)
-	- improve the build process to compile against multiple kernels
-	- stop using default addresses for mpu_opps_addr and
-	  cpufreq_stats_table_addr to avoid confusion
-	- get the address of freq_table automatically with
-	  cpufreq_frequency_get_table()
-	- fix assignments when writing to
-	  /proc/overclock/omap2_clk_init_cpufreq_table_addr (thanks kabaldan)
-	- fix cpufreq stats (patch by kabaldan)
-	version 1.2 - 2010-05-25
-	- change the values of freq_table by writing "index frequency" to
-	  /proc/overclock/freq_table such as:
-	  echo "1 400000" > /proc/overclock/freq_table
-	- change the values of mpu_opps by writing "index rate vsel" to
-	  /proc/overclock/mpu_opps such as:
-	  echo "3 400000000 50" > /proc/overclock/mpu_opps
-	- autodetect freq_table and mpu_opps given
-	  omap2_clk_init_cpufreq_table's address at load time or:
-	  echo 0xc004e498 > /proc/overclock/omap2_clk_init_cpufreq_table_addr
-	  you can find the address with:
-	  grep omap2_clk_init_cpufreq_table /proc/kallsyms
-	version 1.1 - 2010-05-20
-	- mpu_opps now configurable in load time
-	- improved mpu_opps address lookup
-	- corrected vsel units
-	- applied mattih's patch to set policy->user_policy.max
-	version 1.0 - 2010-05-14
-	- initial release
-
-	Description:
-
-	The MPU (Microprocessor Unit) clock has 5 discrete pairs of possible
-	rate frequencies and respective voltages, of which only 4 are passed
-	down to cpufreq as you can see with a tool such as SetCPU. The
-	default frequencies are 125, 250, 500 and 550 MHz (and a hidden
-	600). By using this module, you are changing the highest pair in the
-	tables of both cpufreq and MPU frequencies, so it becomes 125, 250,
-	500 and, say, 800. It's quite stable up to 1200; beyond that it
-	quickly becomes unusable, specially over 1300, with lockups or
-	spontaneous reboots.
-
-	This version was prepared for Motorola Milestone's official Android
-	2.1 for Central Europe, build number SHOLS_U2_02.31.0. Fortunately
-	Motorola appears to have used the same kernel in most of the 2.1
-	firmwares and even 2.0 works. All that's needed is to specify
-	autodetect addresses when loading the module. See KernelModule wiki
-	page at the project site for more information. To port the module to
-	different kernels or even other phones, see the Disassembly wiki
-	page. Testers welcome!
-
-	Usage:
-
-	insmod overclock.ko
-	busybox egrep "omap2_clk_init_cpufreq_table$" /proc/kallsyms
-	echo 0xc004e4b0 > /proc/overclock/omap2_clk_init_cpufreq_table_addr
-	busybox egrep "cpufreq_stats_update$" /proc/kallsyms
-	echo 0xc0295704 > /proc/overclock/cpufreq_stats_update_addr
-	echo 62 > /proc/overclock/max_vsel
-	echo 800000 > /proc/overclock/max_rate
-
-	You should set max_vsel before max_rate if the new rate is going to
-	be higher than the current one, because higher frequencies often
-	require more voltage than supplied by default. Likewise, lower
-	max_rate first before max_vsel if you want to reduce both frequency
-	and voltage:
-
-	echo 550000 > /proc/overclock/max_rate
-	echo 56 > /proc/overclock/max_vsel
-
-	To set a specified frequency and voltage at load time (don't forget
-	to change the addr parameters according to your kernel):
-
-	insmod overclock.ko
-	echo 0xc004e4b0 > /proc/overclock/omap2_clk_init_cpufreq_table_addr
-	echo 0xc0295704 > /proc/overclock/cpufreq_stats_update_addr
-	echo 62 > /proc/overclock/max_vsel
-	echo 800000 > /proc/overclock/max_rate
-
-	It has been reported that the vsel is reset to default while rate
-	stays overclocked. This is caused by the default /system/bin/insmod
-	takes only one argument, which can consist of "nested" arguments,
-	ie, "arg1=1 arg2=2". Busybox's insmod, typically in
-	/system/xbin/insmod, takes normal arguments, ie, "arg1=1" "arg2=2".
-	This difference caused reports of the mpu_opps table not being
-	initialized, because its address was usually the second parameter
-	and it would be ignored when specified in the traditional insmod,
-	although it would work when written to /proc. Therefore it's
-	preferable to load the module without parameters and write the
-	addresses using /proc to maximize compatibility with different
-	insmod implementations.
-
-	Be careful when you try to load this in mot_boot_mode. It's
-	preferable to use the MilestoneOverclock app to do it, because it
-	only works if the sdcard is mounted, which is easy to override in
-	case of a bad overclock.
-
-	Remember that you are merely changing the maximum possible value
-	that cpufreq can choose to use. The current speed may well be lower
-	than the one specified if the phone is idle. I recommend the use of
-	the SetCPU app to effectively change the current frequency through
-	its policies (use Autodetect Speeds instead of Droid/Milestone
-	profile in the device settings).
-*/
+ * Motorola OMAP3 overclock module
+ * version 1.5.0 - 2026-05-01
+ * by Tiago Sousa <mirage@kaotik.org>
+ * License: GNU GPLv2
+ * <http://www.gnu.org/licenses/old-licenses/gpl-2.0.html>
+ * 
+ * Original project site:
+ * http://code.google.com/p/milestone-overclock/   (Site has since been taken down)
+ * 
+ * Changelog:
+ * version 1.5.0 - 2026-05-01
+ * - Add EXPORTed functions for address lookup while keeping legacy LOOKUP function
+ *   from past revisions.
+ * - Improve pr_info logic to avoid duplicate dmesg entries.
+ * - General file maintenance/cleanup.
+ * version 1.4.9 - 2012-05-31 (CyanogenDefy)
+ * - printk level tuneup, add Defy in Description.
+ * - Restore original max rate/vsel on module unload.
+ * version 1.4.8 - 2011-03-20
+ * - Build process for Motorola Milestone 2.2.
+ * version 1.4.7 - 2011-01-16
+ * - Added sr_adjust_vsel field when reading the mpu_opps table if SMARTREFLEX is
+ *   enabled (thanks tekahuna).
+ * version 1.4.6.1 - 2010-12-17
+ * - Rolled back the address detection, needs more testing.
+ * version 1.4.6 - 2010-12-16
+ * - Automatic detection of omap2_clk_init_cpufreq_table_addr and
+ *   cpufreq_stats_update_addr in most 2.6.32 kernels (by Skrilax_CZ and kabaldan).
+ * - Build process for Motorola Flipout, Samsung Galaxy A and Archos tablets a70/a101.
+ * version 1.4.5 - 2010-12-09
+ * - Build process for Motorola Defy.
+ * version 1.4.4 - 2010-10-28
+ * - Build process for Milestone leaked 2.6.32 and Droid 2.2.
+ * version 1.4.3 - 2010-10-25
+ * - Build process for Droid X 2.2.
+ * - Fix vsel setting for Droid X 2.x and others (thanks to kabaldan for hinting at
+ *   this; the struct omap_opp changed to support "smartreflex class 1.5" technology).
+ * - Remove call to omap_pm_cpu_get_freq() because it's no longer exported in 
+ *   Froyo (thanks tekahuna).
+ * version 1.4.2 - 2010-08-31
+ * - Build process for Samsung Galaxy Beam.
+ * version 1.4.1 - 2010-08-30
+ * - Change cpufreq stats when writing to /proc/overclock/freq_table.
+ * version 1.4 - 2010-08-16
+ * - Support kernel version 2.6.32 (Android Froyo).
+ * - Improve the build process to compile against multiple kernels.
+ * - Stop using default addresses for mpu_opps_addr and cpufreq_stats_table_addr
+ *   to avoid confusion.
+ * - Get the address of freq_table automatically with cpufreq_frequency_get_table().
+ * - Fix assignments when writing to
+ *   /proc/overclock/omap2_clk_init_cpufreq_table_addr (thanks kabaldan).
+ * - Fix cpufreq stats (patch by kabaldan).
+ * version 1.2 - 2010-05-25
+ * - Change the values of freq_table by writing "index frequency" to
+ *   /proc/overclock/freq_table such as:
+ *   echo "1 400000" > /proc/overclock/freq_table.
+ * - Change the values of mpu_opps by writing "index rate vsel" to
+ *   /proc/overclock/mpu_opps such as:
+ *   echo "3 400000000 50" > /proc/overclock/mpu_opps.
+ * - Autodetect freq_table and mpu_opps given omap2_clk_init_cpufreq_table's 
+ *   address at load time or:
+ *   echo 0xc004e498 > /proc/overclock/omap2_clk_init_cpufreq_table_addr
+ *   you can find the address with:
+ *   grep omap2_clk_init_cpufreq_table /proc/kallsyms.
+ * version 1.1 - 2010-05-20
+ * - mpu_opps now configurable in load time.
+ * - Improved mpu_opps address lookup.
+ * - Corrected vsel units.
+ * - Applied mattih's patch to set policy->user_policy.max.
+ * version 1.0 - 2010-05-14
+ * - Initial release.
+ * 
+ * Description:
+ * 
+ * The MPU (Microprocessor Unit) clock has 5 discrete pairs of possible rate 
+ * frequencies and respective voltages, of which only 4 are passed down to 
+ * cpufreq as you can see with a tool such as SetCPU. The default frequencies
+ * are 125, 250, 500 and 550 MHz (and a hidden 600). By using this module,
+ * you are changing the highest pair in the tables of both cpufreq and MPU 
+ * frequencies, so it becomes 125, 250, 500 and, say, 800. It's quite stable
+ * up to 1200; beyond that it quickly becomes unusable, specially over 1300,
+ * with lockups or spontaneous reboots.
+ * 
+ * This version was prepared for Motorola Milestone's official Android 2.1 
+ * for Central Europe, build number SHOLS_U2_02.31.0. Fortunately, Motorola 
+ * appears to have used the same kernel in most of the 2.1 firmwares and 
+ * even 2.0 works. All that's needed is to specify autodetect addresses 
+ * when loading the module. See Kernel Module wiki page at the project site
+ * for more information. To port the module to different kernels or even 
+ * other phones, see the Disassembly wiki page. Testers welcome!
+ * 
+ * Usage:
+ * 
+ * insmod overclock.ko
+ * busybox egrep "omap2_clk_init_cpufreq_table$" /proc/kallsyms
+ * echo 0xc004e4b0 > /proc/overclock/omap2_clk_init_cpufreq_table_addr
+ * busybox egrep "cpufreq_stats_update$" /proc/kallsyms
+ * echo 0xc0295704 > /proc/overclock/cpufreq_stats_update_addr
+ * echo 62 > /proc/overclock/max_vsel
+ * echo 800000 > /proc/overclock/max_rate
+ * 
+ * You should set max_vsel before max_rate if the new rate is going to be 
+ * higher than the current one, because higher frequencies often require 
+ * more voltage than supplied by default. Likewise, lower max_rate first 
+ * before max_vsel if you want to reduce both frequency and voltage:
+ * 
+ * echo 550000 > /proc/overclock/max_rate
+ * echo 56 > /proc/overclock/max_vsel
+ * 
+ * To set a specified frequency and voltage at load time (don't forget to 
+ * change the addr parameters according to your kernel):
+ * 
+ * insmod overclock.ko
+ * echo 0xc004e4b0 > /proc/overclock/omap2_clk_init_cpufreq_table_addr
+ * echo 0xc0295704 > /proc/overclock/cpufreq_stats_update_addr
+ * echo 62 > /proc/overclock/max_vsel
+ * echo 800000 > /proc/overclock/max_rate
+ * 
+ * It has been reported that the vsel is reset to default while rate
+ * stays overclocked. This is caused by the default /system/bin/insmod
+ * takes only one argument, which can consist of "nested" arguments,
+ * ie, "arg1=1 arg2=2". Busybox's insmod, typically in
+ * /system/xbin/insmod, takes normal arguments, ie, "arg1=1" "arg2=2".
+ * This difference caused reports of the mpu_opps table not being
+ * initialized, because its address was usually the second parameter
+ * and it would be ignored when specified in the traditional insmod,
+ * although it would work when written to /proc. Therefore it's
+ * preferable to load the module without parameters and write the
+ * addresses using /proc to maximize compatibility with different
+ * insmod implementations.
+ * 
+ * Be careful when you try to load this in mot_boot_mode. It's preferable to 
+ * use the Milestone Overclock app to do it, because it only works if the 
+ * sdcard is mounted, which is easy to override in case of a bad overclock.
+ * 
+ * Remember that you are merely changing the maximum possible value that 
+ * cpufreq can choose to use. The current speed may well be lower than the 
+ * one specified if the phone is idle. I recommend the use of the SetCPU app 
+ * to effectively change the current frequency through its policies (use 
+ * Autodetect Speeds instead of Droid/Milestone profile in the device settings).
+ */
 
 #ifndef SMARTREFLEX
 #warning SMARTREFLEX cflag is not set
@@ -166,7 +161,7 @@
 
 #define DRIVER_AUTHOR "Tiago Sousa <mirage@kaotik.org>"
 #define DRIVER_DESCRIPTION "Motorola Milestone/Defy/Droid/DroidX CPU overclocking"
-#define DRIVER_VERSION "1.4.9"
+#define DRIVER_VERSION "1.5.0"
 
 #ifdef OMAP36XX
 #define DRIVER_DEFAULT_RATE 1000000
@@ -240,6 +235,11 @@ static char *buf = NULL;
 extern unsigned long lookup_symbol_address(const char *name);
 #endif
 
+#ifdef EXPORT
+void omap2_clk_init_cpufreq_table(struct cpufreq_frequency_table **table);
+int cpufreq_stats_update(unsigned int cpu);
+#endif
+
 static void error_mpu_opps(void)
 {
 	pr_err("overclock: mpu_opps address not configured, aborting action\n");
@@ -288,8 +288,6 @@ static void omap2_find_addr(void)
 			&& func[i+2] == 0x9f) { /* [pc, */
 			addr = (void *)((uint)func)+i+8+func[i];
 			mpu_opps_addr = *addr;
-			pr_info("overclock: found mpu_opps_addr at 0x%x\n",
-				mpu_opps_addr);
 			break;
 		}
 	}
@@ -305,8 +303,6 @@ static void stats_find_addr(void)
 			&& func[i+2] == 0x9f) { /* [pc, */
 			addr = (void *)((uint)func)+i+8+func[i];
 			cpufreq_stats_table_addr = *addr;
-			pr_info("overclock: found cpufreq_stats_table_addr at 0x%x\n",
-				cpufreq_stats_table_addr);
 			break;
 		}
 	}
@@ -669,10 +665,23 @@ static int __init overclock_init(void)
 		cpufreq_stats_update_addr = lookup_symbol_address("cpufreq_stats_update");
 #endif
 
+#ifdef EXPORT
+	if(!omap2_clk_init_cpufreq_table_addr)
+		omap2_clk_init_cpufreq_table_addr = (unsigned int)&omap2_clk_init_cpufreq_table;
+	if(!cpufreq_stats_update_addr)
+		cpufreq_stats_update_addr = (unsigned int)&cpufreq_stats_update;
+#endif
+
 	if(omap2_clk_init_cpufreq_table_addr)
 		omap2_find_addr();
 	if(cpufreq_stats_update_addr)
 		stats_find_addr();
+
+	/* Print the results ONCE here in the init sequence */
+	if(mpu_opps_addr)
+		pr_info("overclock: mpu_opps_addr resolved to 0x%x\n", mpu_opps_addr);
+	if(cpufreq_stats_table_addr)
+		pr_info("overclock: cpufreq_stats_table_addr resolved to 0x%x\n", cpufreq_stats_table_addr);
 
 	freq_table = cpufreq_frequency_get_table(0);
 	policy = cpufreq_cpu_get(0);

@@ -22,28 +22,45 @@
 #ifndef _HOOK_H_
 #define _HOOK_H_
 
+#include <linux/types.h>
+
 struct hook_info {
-	unsigned int asm0;
-	unsigned int jmp;
-	unsigned int *target_cont;
-	unsigned int *target;
-	char *targetName;
-	unsigned int newfunc;
+	/* 
+	 * asm0 and jmp MUST stay at the top and stay together.
+	 * This creates a tiny "trampoline" in memory.
+	 */
+	unsigned int asm0;         /* The original instruction we moved */
+	unsigned int jmp;          /* The jump instruction (LDR PC...) */
+	unsigned int *target_cont; /* Address of the 2nd instruction in original func */
+    
+	/* Metadata and addresses */
+	unsigned int *target;      /* The function we are hijacking */
+	char *targetName;          /* The name for kallsyms lookup */
+	unsigned int newfunc;      /* Our replacement function */
 };
 
-int hook(struct hook_info *);
-
-int unhook(struct hook_info *);
-
+/* 
+ * Standard function prototypes 
+ */
+int hook(struct hook_info *hi);
+int unhook(struct hook_info *hi);
 int hook_init(void);
 void hook_exit(void);
 
 extern struct hook_info g_hi[];
 
-#define HOOK_INVOKE(_f, ...) ((typeof(&_f))&g_hi[__COUNTER__].asm0)(__VA_ARGS__)
+/**
+ * HOOK_INVOKE
+ * Instead of relying on a counter, we cast the address of g_hi directly.
+ * Since cpcap_regacc_write is usually the first (and only) entry in your 
+ * array for this module, g_hi[0] is the safest bet.
+ */
+#define HOOK_INVOKE(_f, ...) ((typeof(&_f))&g_hi[0].asm0)(__VA_ARGS__)
 
+/* 
+ * Array Initializers 
+ */
 #define HOOK_INIT(f) { .targetName = #f, .newfunc = (unsigned int)f }
+#define HOOK_INIT_END { .target = NULL, .newfunc = 0 }
 
-#define HOOK_INIT_END { .newfunc = 0 }
-
-#endif
+#endif /* _HOOK_H_ */
