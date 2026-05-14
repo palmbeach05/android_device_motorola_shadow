@@ -22,19 +22,15 @@ DEVICE_PATH := device/motorola/shadow
 COMMON_PATH := device/motorola/shadow-common
 PERMISSION_PATH := frameworks/native/data/etc
 
-# Bootanimation
-TARGET_SCREEN_HEIGHT := 854
-TARGET_SCREEN_WIDTH := 480
-
 # Inherit from those products. Most specific first.
 $(call inherit-product, $(COMMON_PATH)/bootstrap/bootstrap.mk)
 $(call inherit-product, device/common/gps/gps_eu_supl.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
-$(call inherit-product, $(COMMON_PATH)/shadow-blobs.mk)
 $(call inherit-product, frameworks/native/build/phone-hdpi-512-dalvik-heap.mk)
 
 DEVICE_PACKAGE_OVERLAYS += $(COMMON_PATH)/overlay
 
+# System properties
 PRODUCT_PROPERTY_OVERRIDES += \
 	ro.media.capture.flip=horizontalandvertical \
 	ro.com.google.locationfeatures=1 \
@@ -48,10 +44,6 @@ PRODUCT_PROPERTY_OVERRIDES += \
 	persist.sys.root_access=3 \
 	ro.input.noresample=1 \
 #	cm.updater.uri=http://defy.cm-for.us/api \
-
-# Set default USB interface
-PRODUCT_DEFAULT_PROPERTY_OVERRIDES += \
-	persist.sys.usb.config=mass_storage
 
 # wifi props
 PRODUCT_PROPERTY_OVERRIDES += \
@@ -77,6 +69,44 @@ PRODUCT_PROPERTY_OVERRIDES += \
 	ro.cdma.home.operator.numeric=310004 \
 	ro.cdma.homesystem=64,65,76,77,78,79,80,81,82,83 \
 	keyguard.no_require_sim=true
+	
+# Set default USB interface
+PRODUCT_DEFAULT_PROPERTY_OVERRIDES += \
+	persist.sys.usb.config=mass_storage
+
+# --- Boot Animation & Display ---
+TARGET_SCREEN_HEIGHT := 854
+TARGET_SCREEN_WIDTH := 480
+PRODUCT_AAPT_CONFIG := normal hdpi
+PRODUCT_AAPT_PREF_CONFIG := hdpi
+
+# --- Hardware Blobs & Firmware ---
+# --- Connectivity (WLAN/BT Firmware) ---
+PRODUCT_COPY_FILES += \
+    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin \
+    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin \
+    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin \
+    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl1271-nvs.bin:system/etc/firmware/ti-connectivity/wl1271-nvs.bin \
+    $(COMMON_PATH)/prebuilt/etc/firmware/TIInit_7.6.15.bts:system/etc/firmware/TIInit_7.6.15.bts \
+    $(COMMON_PATH)/prebuilt/etc/wifi/wpa_supplicant_overlay.conf:system/etc/wifi/wpa_supplicant_overlay.conf \
+    $(COMMON_PATH)/prebuilt/etc/wifi/p2p_supplicant_overlay.conf:system/etc/wifi/p2p_supplicant_overlay.conf \
+    $(COMMON_PATH)/prebuilt/bin/wifical.sh:system/bin/wifical.sh
+
+# --- Input Configuration (Key Layouts & IDC) ---
+PRODUCT_COPY_FILES += \
+    $(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/lm3530_led.idc \
+    $(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/accelerometer.idc \
+    $(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/compass.idc \
+    $(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/light-prox.idc \
+    $(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/proximity.idc \
+    $(COMMON_PATH)/prebuilt/usr/idc/sholes-keypad.idc:system/usr/idc/sholes-keypad.idc \
+    $(COMMON_PATH)/prebuilt/usr/idc/cpcap-key.idc:system/usr/idc/cpcap-key.idc \
+    $(COMMON_PATH)/prebuilt/usr/idc/qtouch-touchscreen.idc:system/usr/idc/qtouch-touchscreen.idc \
+    $(COMMON_PATH)/prebuilt/usr/qwerty.kl:system/usr/keylayout/qtouch-touchscreen.kl \
+    $(COMMON_PATH)/prebuilt/usr/keypad.kl:system/usr/keylayout/sholes-keypad.kl \
+    $(COMMON_PATH)/prebuilt/usr/keypad.kl:system/usr/keylayout/cdma_shadow-keypad.kl \
+    $(COMMON_PATH)/prebuilt/usr/cpcap-key.kl:system/usr/keylayout/cpcap-key.kl \
+    $(COMMON_PATH)/prebuilt/usr/keychars/cpcap-key.kcm:system/usr/keychars/cpcap-key.kcm
 
 # Permissions files
 PRODUCT_COPY_FILES += \
@@ -97,43 +127,77 @@ PRODUCT_COPY_FILES += \
 	$(PERMISSION_PATH)/android.hardware.usb.accessory.xml:system/etc/permissions/android.hardware.usb.accessory.xml \
 	$(PERMISSION_PATH)/android.hardware.usb.host.xml:system/etc/permissions/android.hardware.usb.host.xml
 
+# --- Product Packages ---
+# Audio & Connectivity
 PRODUCT_PACKAGES += \
-	com.android.future.usb.accessory
+    audio.a2dp.default \
+    audio.r_submix.default \
+    libaudiohw_legacy \
+    libaudioutils \
+    libbluedroid \
+    libbt-vendor
 
-# Legacy sound
+# Networking & Wireless
 PRODUCT_PACKAGES += \
-	libaudioutils audio.a2dp.default \
-	audio.r_submix.default \
-	libaudiohw_legacy \
-
-# OMX stuff
-PRODUCT_PACKAGES += dspexec libbridge libLCML libOMX_Core libstagefrighthw
-PRODUCT_PACKAGES += libOMX.TI.AAC.encode libOMX.TI.AAC.decode libOMX.TI.AMR.decode libOMX.TI.AMR.encode
-PRODUCT_PACKAGES += libOMX.TI.WBAMR.encode libOMX.TI.MP3.decode libOMX.TI.WBAMR.decode
-PRODUCT_PACKAGES += libOMX.TI.Video.Decoder libOMX.TI.Video.encoder libOMX.TI.JPEG.Encoder
-PRODUCT_PACKAGES += libOMX.TI.720P.Encoder
-
-# Droid X stuff
-PRODUCT_PACKAGES += libfnc DXParts MotoFM MotoFMService HwaSettings
-PRODUCT_PACKAGES += charge_only_mode mot_boot_mode
-
-# Experimental TI OpenLink
-PRODUCT_PACKAGES += libnl_2 iw libbt-vendor uim-sysfs libbluedroid
-
-# Wifi
-PRODUCT_PACKAGES += \
-    lib_driver_cmd_wl12xx \
     dhcpcd.conf \
     hostapd.conf \
-    wpa_supplicant.conf \
+    iw \
+    libnl_2 \
     regulatory.bin \
     ti_wfd_libs \
+	lib_driver_cmd_wl12xx \
+    wpa_supplicant.conf
+
+# Motorola Specifics & Hardware Bringup
+PRODUCT_PACKAGES += \
     calibrator \
+    charge_only_mode \
+    dspexec \
+    libfnc \
+    mot_boot_mode \
+    uim-sysfs
 
-# Should be after the full_base include, which loads languages_full
-PRODUCT_LOCALES := en_US en_GB en_IN fr_FR it_IT de_DE es_ES hu_HU uk_UA zh_CN zh_TW ru_RU nl_NL se_SV cs_CZ pl_PL pt_BR da_DK ko_KR el_GR ro_RO iw_IL ar_EG sv_SE he_IL fi_FI bg_BG hr_HR sr_RS sl_SI tr_TR
+# Shadow Apps & UI Tools
+PRODUCT_PACKAGES += \
+    DXParts \
+    HwaSettings \
+    MotoFM \
+    MotoFMService
 
-# Include drawables for hdpi densities
-PRODUCT_AAPT_CONFIG := normal hdpi
-PRODUCT_AAPT_PREF_CONFIG := hdpi
+# System Components
+PRODUCT_PACKAGES += \
+    com.android.future.usb.accessory
 
+# Media & OMX
+PRODUCT_PACKAGES += \
+	libbridge libLCML libOMX_Core libstagefrighthw \
+	libOMX.TI.AAC.encode libOMX.TI.AAC.decode libOMX.TI.AMR.decode libOMX.TI.AMR.encode \
+	libOMX.TI.WBAMR.encode libOMX.TI.MP3.decode libOMX.TI.WBAMR.decode \
+	libOMX.TI.Video.Decoder libOMX.TI.Video.encoder libOMX.TI.JPEG.Encoder \
+	libOMX.TI.720P.Encoder
+	
+# --- Localization ---
+PRODUCT_LOCALES := \
+    en_US en_GB en_IN fr_FR it_IT de_DE es_ES \
+    hu_HU uk_UA zh_CN zh_TW ru_RU nl_NL se_SV \
+    cs_CZ pl_PL pt_BR da_DK ko_KR el_GR ro_RO \
+    iw_IL ar_EG sv_SE he_IL fi_FI bg_BG hr_HR \
+    sr_RS sl_SI tr_TR
+
+# --- System Scripts & Configs ---
+PRODUCT_COPY_FILES += \
+    $(COMMON_PATH)/prebuilt/etc/init.d/08backlight:system/etc/init.d/08backlight \
+    $(COMMON_PATH)/prebuilt/etc/init.d/90multitouch:system/etc/init.d/90multitouch \
+    $(COMMON_PATH)/prebuilt/etc/init.d/09overclock:system/etc/init.d/09overclock \
+    $(COMMON_PATH)/prebuilt/etc/init.d/98netflix:system/etc/init.d/98netflix \
+    $(COMMON_PATH)/prebuilt/etc/sysctl.conf:system/etc/sysctl.conf \
+    $(COMMON_PATH)/prebuilt/etc/gpsconfig.xml:system/etc/gpsconfig.xml \
+    $(COMMON_PATH)/prebuilt/etc/location.cfg:system/etc/location.cfg \
+    $(COMMON_PATH)/prebuilt/etc/media_codecs.xml:system/etc/media_codecs.xml \
+    $(COMMON_PATH)/prebuilt/etc/audio_policy.conf:system/etc/audio_policy.conf \
+    $(COMMON_PATH)/prebuilt/etc/apns-conf.xml:system/etc/apns-conf.xml
+
+# copy all others kernel modules under the "modules" directory to system/lib/modules
+PRODUCT_COPY_FILES += $(shell test -d $(COMMON_PATH)/modules/prebuilt && \
+	find $(COMMON_PATH)/modules/prebuilt -name '*.ko' \
+	-printf '%p:system/lib/modules/%f ')
