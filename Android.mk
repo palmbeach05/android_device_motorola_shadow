@@ -16,4 +16,13 @@ LOCAL_PATH := $(call my-dir)
 COMMON_PATH := device/motorola/shadow-common
 DEVICE_PATH := device/motorola/shadow
 
+include $(CLEAR_VARS)
+LOCAL_MODULE := recovery_tzdata
+LOCAL_MODULE_STEM := tzdata
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_CLASS := ETC
+LOCAL_MODULE_PATH := $(TARGET_RECOVERY_ROOT_OUT)/usr/share/zoneinfo
+LOCAL_SRC_FILES := ../../../bionic/libc/zoneinfo/tzdata
+include $(BUILD_PREBUILT)
+
 include $(call all-makefiles-under,$(COMMON_PATH))

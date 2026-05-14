@@ -197,7 +197,7 @@ PRODUCT_COPY_FILES += \
     $(COMMON_PATH)/prebuilt/etc/audio_policy.conf:system/etc/audio_policy.conf \
     $(COMMON_PATH)/prebuilt/etc/apns-conf.xml:system/etc/apns-conf.xml
 
-# copy all others kernel modules under the "modules" directory to system/lib/modules
-PRODUCT_COPY_FILES += $(shell test -d $(COMMON_PATH)/modules/prebuilt && \
-	find $(COMMON_PATH)/modules/prebuilt -name '*.ko' \
-	-printf '%p:system/lib/modules/%f ')
+# --- Time Zone data for recovery ---
+PRODUCT_COPY_FILES += \
+    bionic/libc/zoneinfo/tzdata:recovery/root/system/usr/share/zoneinfo/tzdata \
+    bionic/libc/zoneinfo/tzdata:recovery/root/usr/share/zoneinfo/tzdata
