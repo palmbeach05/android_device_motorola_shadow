@@ -1,79 +1,37 @@
 #
 # Copyright (C) 2011 The Android Open Source Project
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Licensed under the Apache License, Version 2.0
 #
 
-#
-# This is the product configuration for a generic Motorola Droid X (shadow)
-#
+# Product configuration for Motorola Droid X (shadow)
+
 # --- Path Definitions ---
 DEVICE_PATH := device/motorola/shadow
 COMMON_PATH := device/motorola/shadow-common
 PERMISSION_PATH := frameworks/native/data/etc
 
-# Inherit from those products. Most specific first.
-$(call inherit-product, $(COMMON_PATH)/bootstrap/bootstrap.mk)
+# --- Inheritances (Most specific first) ---
+$(call inherit-product, device/motorola/shadow-common/bootstrap/bootstrap.mk)
 $(call inherit-product, device/common/gps/gps_eu_supl.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
 $(call inherit-product, frameworks/native/build/phone-hdpi-512-dalvik-heap.mk)
 
-DEVICE_PACKAGE_OVERLAYS += $(COMMON_PATH)/overlay
+DEVICE_PACKAGE_OVERLAYS += device/motorola/shadow-common/overlay
 
 # System properties
+-include $(LOCAL_PATH)/system_prop.mk
+
+PLATFORM_BASE_OS := 4.4.4
 PRODUCT_PROPERTY_OVERRIDES += \
-	ro.media.capture.flip=horizontalandvertical \
-	ro.com.google.locationfeatures=1 \
-	ro.media.dec.jpeg.memcap=20000000 \
-	net.dns1=8.8.8.8 \
-	net.dns2=8.8.4.4 \
-	ro.opengles.version=131072 \
-	hwui.use.blacklist=true \
-	ro.sf.lcd_density=240 \
 	dalvik.vm.debug.alloc=0 \
-	persist.sys.root_access=3 \
+	hwui.use.blacklist=true \
 	ro.input.noresample=1 \
-#	cm.updater.uri=http://defy.cm-for.us/api \
-
-# wifi props
-PRODUCT_PROPERTY_OVERRIDES += \
-	wifi.interface=wlan0 \
-	softap.interface=wlan0 \
-	wifi.supplicant_scan_interval=60 \
-
-# telephony props
-PRODUCT_PROPERTY_OVERRIDES += \
-	ro.telephony.call_ring.multiple=false \
-	ro.telephony.call_ring.delay=30 \
-	ro.telephony.default_network=4 \
-	mobiledata.interfaces=ppp0 \
-	persist.ril.mux.retries=500 \
-	persist.ril.mux.sleep=2 \
-	persist.ril.mux.noofchannels=7 \
-	persist.ril.modem.ttydevice=/dev/usb/tty1-3:1.0 \
-	persist.ril.features=0x07 \
-	persist.ril.mux.ttydevice=/dev/ttyS0 \
-	persist.ril.pppd.start.fail.max=16 \
-	ro.cdma.data_retry_config=default_randomization=2000,0,0,120000,180000,540000,960000 \
-	ro.cdma.home.operator.alpha=Verizon \
-	ro.cdma.home.operator.numeric=310004 \
-	ro.cdma.homesystem=64,65,76,77,78,79,80,81,82,83 \
+	persist.sys.root_access=3 \
 	keyguard.no_require_sim=true
-	
-# Set default USB interface
+
 PRODUCT_DEFAULT_PROPERTY_OVERRIDES += \
 	persist.sys.usb.config=mass_storage
-
+	
 # --- Boot Animation & Display ---
 TARGET_SCREEN_HEIGHT := 854
 TARGET_SCREEN_WIDTH := 480
@@ -83,9 +41,9 @@ PRODUCT_AAPT_PREF_CONFIG := hdpi
 # --- Hardware Blobs & Firmware ---
 # --- Connectivity (WLAN/BT Firmware) ---
 PRODUCT_COPY_FILES += \
-    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin \
-    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin \
-    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin \
+    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-5-mr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin \
+    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-5-plt.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin \
+    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-5-sr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin \
     $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl1271-nvs.bin:system/etc/firmware/ti-connectivity/wl1271-nvs.bin \
     $(COMMON_PATH)/prebuilt/etc/firmware/TIInit_7.6.15.bts:system/etc/firmware/TIInit_7.6.15.bts \
     $(COMMON_PATH)/prebuilt/etc/wifi/wpa_supplicant_overlay.conf:system/etc/wifi/wpa_supplicant_overlay.conf \
@@ -108,7 +66,7 @@ PRODUCT_COPY_FILES += \
     $(COMMON_PATH)/prebuilt/usr/cpcap-key.kl:system/usr/keylayout/cpcap-key.kl \
     $(COMMON_PATH)/prebuilt/usr/keychars/cpcap-key.kcm:system/usr/keychars/cpcap-key.kcm
 
-# Permissions files
+# --- Permissions Files ---
 PRODUCT_COPY_FILES += \
 	$(PERMISSION_PATH)/android.hardware.bluetooth.xml:system/etc/permissions/android.hardware.bluetooth.xml \
 	$(PERMISSION_PATH)/android.hardware.camera.flash-autofocus.xml:system/etc/permissions/android.hardware.camera.flash-autofocus.xml \
@@ -145,7 +103,6 @@ PRODUCT_PACKAGES += \
     libnl_2 \
     regulatory.bin \
     ti_wfd_libs \
-	lib_driver_cmd_wl12xx \
     wpa_supplicant.conf
 
 # Motorola Specifics & Hardware Bringup
@@ -162,12 +119,15 @@ PRODUCT_PACKAGES += \
     DXParts \
     HwaSettings \
     MotoFM \
-    MotoFMService
+    MotoFMService \
+    safestrapmenu
 
-# System Components
+# Webview & System Components
 PRODUCT_PACKAGES += \
-    com.android.future.usb.accessory
-
+    com.android.future.usb.accessory \
+    libwebview_shadow \
+    webviewchromium
+	
 # Media & OMX
 PRODUCT_PACKAGES += \
 	libbridge libLCML libOMX_Core libstagefrighthw \
@@ -175,7 +135,7 @@ PRODUCT_PACKAGES += \
 	libOMX.TI.WBAMR.encode libOMX.TI.MP3.decode libOMX.TI.WBAMR.decode \
 	libOMX.TI.Video.Decoder libOMX.TI.Video.encoder libOMX.TI.JPEG.Encoder \
 	libOMX.TI.720P.Encoder
-	
+
 # --- Localization ---
 PRODUCT_LOCALES := \
     en_US en_GB en_IN fr_FR it_IT de_DE es_ES \
@@ -183,7 +143,7 @@ PRODUCT_LOCALES := \
     cs_CZ pl_PL pt_BR da_DK ko_KR el_GR ro_RO \
     iw_IL ar_EG sv_SE he_IL fi_FI bg_BG hr_HR \
     sr_RS sl_SI tr_TR
-
+	
 # --- System Scripts & Configs ---
 PRODUCT_COPY_FILES += \
     $(COMMON_PATH)/prebuilt/etc/init.d/08backlight:system/etc/init.d/08backlight \
