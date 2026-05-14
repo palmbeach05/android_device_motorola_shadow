@@ -12,50 +12,50 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-device_path = device/moto/shadow-common
+COMMON_PATH = device/moto/shadow-common
 
 # Key layouts, names must fit the ones in /proc/bus/input/devices, qwerty.kl is the fallback one.
 PRODUCT_COPY_FILES += \
-	$(device_path)/prebuilt/usr/idc/internal.idc:system/usr/idc/lm3530_led.idc \
-	$(device_path)/prebuilt/usr/idc/internal.idc:system/usr/idc/accelerometer.idc \
-	$(device_path)/prebuilt/usr/idc/internal.idc:system/usr/idc/compass.idc \
-	$(device_path)/prebuilt/usr/idc/internal.idc:system/usr/idc/light-prox.idc \
-	$(device_path)/prebuilt/usr/idc/internal.idc:system/usr/idc/proximity.idc \
-	$(device_path)/prebuilt/usr/idc/sholes-keypad.idc:system/usr/idc/sholes-keypad.idc \
-	$(device_path)/prebuilt/usr/idc/cpcap-key.idc:system/usr/idc/cpcap-key.idc \
-	$(device_path)/prebuilt/usr/idc/qtouch-touchscreen.idc:system/usr/idc/qtouch-touchscreen.idc \
-	$(device_path)/prebuilt/usr/qwerty.kl:system/usr/keylayout/qtouch-touchscreen.kl \
-	$(device_path)/prebuilt/usr/keypad.kl:system/usr/keylayout/sholes-keypad.kl \
-	$(device_path)/prebuilt/usr/keypad.kl:system/usr/keylayout/cdma_shadow-keypad.kl \
-	$(device_path)/prebuilt/usr/cpcap-key.kl:system/usr/keylayout/cpcap-key.kl \
-	$(device_path)/prebuilt/usr/keychars/cpcap-key.kcm:system/usr/keychars/cpcap-key.kcm
+	$(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/lm3530_led.idc \
+	$(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/accelerometer.idc \
+	$(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/compass.idc \
+	$(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/light-prox.idc \
+	$(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/proximity.idc \
+	$(COMMON_PATH)/prebuilt/usr/idc/sholes-keypad.idc:system/usr/idc/sholes-keypad.idc \
+	$(COMMON_PATH)/prebuilt/usr/idc/cpcap-key.idc:system/usr/idc/cpcap-key.idc \
+	$(COMMON_PATH)/prebuilt/usr/idc/qtouch-touchscreen.idc:system/usr/idc/qtouch-touchscreen.idc \
+	$(COMMON_PATH)/prebuilt/usr/qwerty.kl:system/usr/keylayout/qtouch-touchscreen.kl \
+	$(COMMON_PATH)/prebuilt/usr/keypad.kl:system/usr/keylayout/sholes-keypad.kl \
+	$(COMMON_PATH)/prebuilt/usr/keypad.kl:system/usr/keylayout/cdma_shadow-keypad.kl \
+	$(COMMON_PATH)/prebuilt/usr/cpcap-key.kl:system/usr/keylayout/cpcap-key.kl \
+	$(COMMON_PATH)/prebuilt/usr/keychars/cpcap-key.kcm:system/usr/keychars/cpcap-key.kcm
 
 PRODUCT_COPY_FILES += \
-	$(device_path)/prebuilt/etc/init.d/08backlight:system/etc/init.d/08backlight \
-	$(device_path)/prebuilt/etc/init.d/90multitouch:system/etc/init.d/90multitouch \
-	$(device_path)/prebuilt/etc/init.d/09overclock:system/etc/init.d/09overclock \
-	$(device_path)/prebuilt/etc/init.d/98netflix:system/etc/init.d/98netflix \
-	$(device_path)/prebuilt/etc/sysctl.conf:system/etc/sysctl.conf \
-	$(device_path)/prebuilt/etc/gpsconfig.xml:system/etc/gpsconfig.xml \
-	$(device_path)/prebuilt/etc/location.cfg:system/etc/location.cfg \
-	$(device_path)/prebuilt/etc/media_codecs.xml:system/etc/media_codecs.xml \
-	$(device_path)/prebuilt/etc/audio_policy.conf:system/etc/audio_policy.conf \
-	$(device_path)/prebuilt/etc/apns-conf.xml:system/etc/apns-conf.xml
+	$(COMMON_PATH)/prebuilt/etc/init.d/08backlight:system/etc/init.d/08backlight \
+	$(COMMON_PATH)/prebuilt/etc/init.d/90multitouch:system/etc/init.d/90multitouch \
+	$(COMMON_PATH)/prebuilt/etc/init.d/09overclock:system/etc/init.d/09overclock \
+	$(COMMON_PATH)/prebuilt/etc/init.d/98netflix:system/etc/init.d/98netflix \
+	$(COMMON_PATH)/prebuilt/etc/sysctl.conf:system/etc/sysctl.conf \
+	$(COMMON_PATH)/prebuilt/etc/gpsconfig.xml:system/etc/gpsconfig.xml \
+	$(COMMON_PATH)/prebuilt/etc/location.cfg:system/etc/location.cfg \
+	$(COMMON_PATH)/prebuilt/etc/media_codecs.xml:system/etc/media_codecs.xml \
+	$(COMMON_PATH)/prebuilt/etc/audio_policy.conf:system/etc/audio_policy.conf \
+	$(COMMON_PATH)/prebuilt/etc/apns-conf.xml:system/etc/apns-conf.xml
 
 # WLAN/WPAN firmware
 PRODUCT_COPY_FILES += \
-    $(device_path)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin \
-    $(device_path)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin \
-    $(device_path)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin \
-    $(device_path)/prebuilt/etc/firmware/ti-connectivity/wl1271-nvs.bin:system/etc/firmware/ti-connectivity/wl1271-nvs.bin \
-    $(device_path)/prebuilt/etc/firmware/TIInit_7.2.31.bts:system/etc/firmware/TIInit_7.2.31.bts \
-    $(device_path)/prebuilt/etc/wifi/wpa_supplicant_overlay.conf:system/etc/wifi/wpa_supplicant_overlay.conf \
-    $(device_path)/prebuilt/etc/wifi/p2p_supplicant_overlay.conf:system/etc/wifi/p2p_supplicant_overlay.conf \
-    ${device_path}/prebuilt/bin/wifical.sh:system/bin/wifical.sh
+    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin \
+    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin \
+    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin \
+    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl1271-nvs.bin:system/etc/firmware/ti-connectivity/wl1271-nvs.bin \
+    $(COMMON_PATH)/prebuilt/etc/firmware/TIInit_7.2.31.bts:system/etc/firmware/TIInit_7.2.31.bts \
+    $(COMMON_PATH)/prebuilt/etc/wifi/wpa_supplicant_overlay.conf:system/etc/wifi/wpa_supplicant_overlay.conf \
+    $(COMMON_PATH)/prebuilt/etc/wifi/p2p_supplicant_overlay.conf:system/etc/wifi/p2p_supplicant_overlay.conf \
+    $(COMMON_PATH)/prebuilt/bin/wifical.sh:system/bin/wifical.sh
 
 # copy all others kernel modules under the "modules" directory to system/lib/modules
-PRODUCT_COPY_FILES += $(shell test -d device/moto/shadow-common/modules/prebuilt && \
-	find device/moto/shadow-common/modules/prebuilt -name '*.ko' \
+PRODUCT_COPY_FILES += $(shell test -d $(COMMON_PATH)/modules/prebuilt && \
+	find $(COMMON_PATH)/modules/prebuilt -name '*.ko' \
 	-printf '%p:system/lib/modules/%f ')
 
 #end of shadow-blobs.mk

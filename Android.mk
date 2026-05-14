@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+LOCAL_PATH := $(call my-dir)
+COMMON_PATH := device/motorola/shadow-common
+DEVICE_PATH := device/motorola/shadow
 
-ifeq ($(TARGET_USE_SHADOW_COMMON),true)
-include $(all-subdir-makefiles)
-endif
-
+include $(call all-makefiles-under,$(COMMON_PATH))

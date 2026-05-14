@@ -17,18 +17,22 @@
 #
 # This is the product configuration for a generic Motorola Droid X (shadow)
 #
+# --- Path Definitions ---
+DEVICE_PATH := device/motorola/shadow
+COMMON_PATH := device/motorola/shadow-common
+
 # Bootanimation
 TARGET_SCREEN_HEIGHT := 854
 TARGET_SCREEN_WIDTH := 480
 
 # Inherit from those products. Most specific first.
-$(call inherit-product, device/moto/shadow-common/bootstrap/bootstrap.mk)
+$(call inherit-product, $(COMMON_PATH)/bootstrap/bootstrap.mk)
 $(call inherit-product, device/common/gps/gps_eu_supl.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
-$(call inherit-product, device/moto/shadow-common/shadow-blobs.mk)
+$(call inherit-product, $(COMMON_PATH)/shadow-blobs.mk)
 $(call inherit-product, frameworks/native/build/phone-hdpi-512-dalvik-heap.mk)
 
-DEVICE_PACKAGE_OVERLAYS += device/moto/shadow-common/overlay
+DEVICE_PACKAGE_OVERLAYS += $(COMMON_PATH)/overlay
 
 PRODUCT_PROPERTY_OVERRIDES += \
 	ro.media.capture.flip=horizontalandvertical \
