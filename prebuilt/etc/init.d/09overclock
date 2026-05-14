@@ -5,12 +5,27 @@
 MODULE_DIR="/system/lib/modules"
 MODULE="/system/lib/modules/overclock_defy.ko"
 SYMSEARCH_MODULE="/system/lib/modules/symsearch.ko"
+
 /system/xbin/insmod $SYMSEARCH_MODULE
 /system/xbin/insmod $MODULE_DIR/cpufreq_stats.ko
-cpufreq_table=`grep -e omap2_clk_init_cpufreq_table /proc/kallsyms | sed -e "s/\([0-9A-Fa-f]\{8\}\).*/\1/"`
-stats_update=`grep -e cpufreq_stats_freq_update /proc/kallsyms | sed -e "s/\([0-9A-Fa-f]\{8\}\).*/\1/"`
-/system/xbin/insmod $MODULE omap2_clk_init_cpufreq_table_addr=0x$cpufreq_table
-echo 0x$stats_update > /proc/overclock/cpufreq_stats_update_addr
 
+# Load the module WITHOUT arguments to avoid "Unknown parameter" errors
+/system/xbin/insmod $MODULE
 
+# Grab the addresses from kallsyms
+cpufreq_table=`grep -w omap2_clk_init_cpufreq_table /proc/kallsyms | head -n 1 | cut -c 1-8`
+stats_update=`grep -w cpufreq_stats_freq_update /proc/kallsyms | head -n 1 | cut -c 1-8`
 
+# Write addresses to /proc only if it's currently 0x0
+# If the EXPORT module already found them, this will just overwrite with 
+# the same value (safe). If it's an old module, this "wakes it up."
+TABLE_ADDR=$(cat /proc/overclock/omap2_clk_init_cpufreq_table_addr)
+if [ "$TABLE_ADDR" = "0x0" ]; then
+    cpufreq_table=`grep -w omap2_clk_init_cpufreq_table /proc/kallsyms | head -n 1 | cut -c 1-8`
+    echo 0x$cpufreq_table > /proc/overclock/omap2_clk_init_cpufreq_table_addr
+fi
+STATS_ADDR=$(cat /proc/overclock/cpufreq_stats_update_addr)
+if [ "$STATS_ADDR" = "0x0" ]; then
+    stats_update=`grep -w cpufreq_stats_freq_update /proc/kallsyms | head -n 1 | cut -c 1-8`
+    echo 0x$stats_update > /proc/overclock/cpufreq_stats_update_addr
+fi
