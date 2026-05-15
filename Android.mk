@@ -13,7 +13,6 @@
 # limitations under the License.
 
 LOCAL_PATH := $(call my-dir)
-COMMON_PATH := device/motorola/shadow-common
 DEVICE_PATH := device/motorola/shadow
 
 include $(CLEAR_VARS)

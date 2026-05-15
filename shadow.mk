@@ -7,20 +7,18 @@
 
 # --- Path Definitions ---
 DEVICE_PATH := device/motorola/shadow
-COMMON_PATH := device/motorola/shadow-common
 PERMISSION_PATH := frameworks/native/data/etc
 
 # --- Inheritances (Most specific first) ---
-$(call inherit-product, device/motorola/shadow-common/bootstrap/bootstrap.mk)
+$(call inherit-product, $(DEVICE_PATH)/bootstrap/bootstrap.mk)
 $(call inherit-product, device/common/gps/gps_eu_supl.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
 $(call inherit-product, frameworks/native/build/phone-hdpi-512-dalvik-heap.mk)
+$(call inherit-product, vendor/motorola/shadow-common/shadow-vendor.mk)
 
-DEVICE_PACKAGE_OVERLAYS += device/motorola/shadow-common/overlay
+DEVICE_PACKAGE_OVERLAYS += $(DEVICE_PATH)/overlay
 
 # System properties
--include $(LOCAL_PATH)/system_prop.mk
-
 PLATFORM_BASE_OS := 4.4.4
 PRODUCT_PROPERTY_OVERRIDES += \
 	dalvik.vm.debug.alloc=0 \
@@ -41,30 +39,30 @@ PRODUCT_AAPT_PREF_CONFIG := hdpi
 # --- Hardware Blobs & Firmware ---
 # --- Connectivity (WLAN/BT Firmware) ---
 PRODUCT_COPY_FILES += \
-    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-5-mr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin \
-    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-5-plt.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin \
-    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-5-sr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin \
-    $(COMMON_PATH)/prebuilt/etc/firmware/ti-connectivity/wl1271-nvs.bin:system/etc/firmware/ti-connectivity/wl1271-nvs.bin \
-    $(COMMON_PATH)/prebuilt/etc/firmware/TIInit_7.6.15.bts:system/etc/firmware/TIInit_7.6.15.bts \
-    $(COMMON_PATH)/prebuilt/etc/wifi/wpa_supplicant_overlay.conf:system/etc/wifi/wpa_supplicant_overlay.conf \
-    $(COMMON_PATH)/prebuilt/etc/wifi/p2p_supplicant_overlay.conf:system/etc/wifi/p2p_supplicant_overlay.conf \
-    $(COMMON_PATH)/prebuilt/bin/wifical.sh:system/bin/wifical.sh
+    $(DEVICE_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin \
+    $(DEVICE_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin \
+    $(DEVICE_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin \
+    $(DEVICE_PATH)/prebuilt/etc/firmware/ti-connectivity/wl1271-nvs.bin:system/etc/firmware/ti-connectivity/wl1271-nvs.bin \
+    $(DEVICE_PATH)/prebuilt/etc/firmware/TIInit_7.6.15.bts:system/etc/firmware/TIInit_7.6.15.bts \
+    $(DEVICE_PATH)/prebuilt/etc/wifi/wpa_supplicant_overlay.conf:system/etc/wifi/wpa_supplicant_overlay.conf \
+    $(DEVICE_PATH)/prebuilt/etc/wifi/p2p_supplicant_overlay.conf:system/etc/wifi/p2p_supplicant_overlay.conf \
+    $(DEVICE_PATH)/prebuilt/bin/wifical.sh:system/bin/wifical.sh
 
 # --- Input Configuration (Key Layouts & IDC) ---
 PRODUCT_COPY_FILES += \
-    $(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/lm3530_led.idc \
-    $(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/accelerometer.idc \
-    $(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/compass.idc \
-    $(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/light-prox.idc \
-    $(COMMON_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/proximity.idc \
-    $(COMMON_PATH)/prebuilt/usr/idc/sholes-keypad.idc:system/usr/idc/sholes-keypad.idc \
-    $(COMMON_PATH)/prebuilt/usr/idc/cpcap-key.idc:system/usr/idc/cpcap-key.idc \
-    $(COMMON_PATH)/prebuilt/usr/idc/qtouch-touchscreen.idc:system/usr/idc/qtouch-touchscreen.idc \
-    $(COMMON_PATH)/prebuilt/usr/qwerty.kl:system/usr/keylayout/qtouch-touchscreen.kl \
-    $(COMMON_PATH)/prebuilt/usr/keypad.kl:system/usr/keylayout/sholes-keypad.kl \
-    $(COMMON_PATH)/prebuilt/usr/keypad.kl:system/usr/keylayout/cdma_shadow-keypad.kl \
-    $(COMMON_PATH)/prebuilt/usr/cpcap-key.kl:system/usr/keylayout/cpcap-key.kl \
-    $(COMMON_PATH)/prebuilt/usr/keychars/cpcap-key.kcm:system/usr/keychars/cpcap-key.kcm
+    $(DEVICE_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/lm3530_led.idc \
+    $(DEVICE_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/accelerometer.idc \
+    $(DEVICE_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/compass.idc \
+    $(DEVICE_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/light-prox.idc \
+    $(DEVICE_PATH)/prebuilt/usr/idc/internal.idc:system/usr/idc/proximity.idc \
+    $(DEVICE_PATH)/prebuilt/usr/idc/sholes-keypad.idc:system/usr/idc/sholes-keypad.idc \
+    $(DEVICE_PATH)/prebuilt/usr/idc/cpcap-key.idc:system/usr/idc/cpcap-key.idc \
+    $(DEVICE_PATH)/prebuilt/usr/idc/qtouch-touchscreen.idc:system/usr/idc/qtouch-touchscreen.idc \
+    $(DEVICE_PATH)/prebuilt/usr/qwerty.kl:system/usr/keylayout/qtouch-touchscreen.kl \
+    $(DEVICE_PATH)/prebuilt/usr/keypad.kl:system/usr/keylayout/sholes-keypad.kl \
+    $(DEVICE_PATH)/prebuilt/usr/keypad.kl:system/usr/keylayout/cdma_shadow-keypad.kl \
+    $(DEVICE_PATH)/prebuilt/usr/cpcap-key.kl:system/usr/keylayout/cpcap-key.kl \
+    $(DEVICE_PATH)/prebuilt/usr/keychars/cpcap-key.kcm:system/usr/keychars/cpcap-key.kcm
 
 # --- Permissions Files ---
 PRODUCT_COPY_FILES += \
@@ -125,9 +123,7 @@ PRODUCT_PACKAGES += \
 
 # Webview & System Components
 PRODUCT_PACKAGES += \
-    com.android.future.usb.accessory \
-    libwebview_shadow \
-    webviewchromium
+    com.android.future.usb.accessory
 	
 # Media & OMX
 PRODUCT_PACKAGES += \
@@ -147,16 +143,16 @@ PRODUCT_LOCALES := \
 	
 # --- System Scripts & Configs ---
 PRODUCT_COPY_FILES += \
-    $(COMMON_PATH)/prebuilt/etc/init.d/08backlight:system/etc/init.d/08backlight \
-    $(COMMON_PATH)/prebuilt/etc/init.d/90multitouch:system/etc/init.d/90multitouch \
-    $(COMMON_PATH)/prebuilt/etc/init.d/09overclock:system/etc/init.d/09overclock \
-    $(COMMON_PATH)/prebuilt/etc/init.d/98netflix:system/etc/init.d/98netflix \
-    $(COMMON_PATH)/prebuilt/etc/sysctl.conf:system/etc/sysctl.conf \
-    $(COMMON_PATH)/prebuilt/etc/gpsconfig.xml:system/etc/gpsconfig.xml \
-    $(COMMON_PATH)/prebuilt/etc/location.cfg:system/etc/location.cfg \
-    $(COMMON_PATH)/prebuilt/etc/media_codecs.xml:system/etc/media_codecs.xml \
-    $(COMMON_PATH)/prebuilt/etc/audio_policy.conf:system/etc/audio_policy.conf \
-    $(COMMON_PATH)/prebuilt/etc/apns-conf.xml:system/etc/apns-conf.xml
+    $(DEVICE_PATH)/prebuilt/etc/init.d/08backlight:system/etc/init.d/08backlight \
+    $(DEVICE_PATH)/prebuilt/etc/init.d/90multitouch:system/etc/init.d/90multitouch \
+    $(DEVICE_PATH)/prebuilt/etc/init.d/09overclock:system/etc/init.d/09overclock \
+    $(DEVICE_PATH)/prebuilt/etc/init.d/98netflix:system/etc/init.d/98netflix \
+    $(DEVICE_PATH)/prebuilt/etc/sysctl.conf:system/etc/sysctl.conf \
+    $(DEVICE_PATH)/prebuilt/etc/gpsconfig.xml:system/etc/gpsconfig.xml \
+    $(DEVICE_PATH)/prebuilt/etc/location.cfg:system/etc/location.cfg \
+    $(DEVICE_PATH)/prebuilt/etc/media_codecs.xml:system/etc/media_codecs.xml \
+    $(DEVICE_PATH)/prebuilt/etc/audio_policy.conf:system/etc/audio_policy.conf \
+    $(DEVICE_PATH)/prebuilt/etc/apns-conf.xml:system/etc/apns-conf.xml
 
 # --- Time Zone data for recovery ---
 PRODUCT_COPY_FILES += \

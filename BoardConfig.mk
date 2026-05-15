@@ -28,7 +28,6 @@
 # Inherit from the proprietary version if it exists
 -include vendor/motorola/shadow-common/shadow-vendor.mk
 
-COMMON_PATH := device/motorola/shadow-common
 DEVICE_PATH := device/motorola/shadow
 
 # --- CPU & Architecture ---
@@ -90,7 +89,7 @@ else
 endif
 
 BOARD_HAVE_BLUETOOTH						:= true
-BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR := $(COMMON_PATH)/bluetooth_bluedroid
+BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR := $(DEVICE_PATH)/bluetooth_bluedroid
 TARGET_USE_BLUEDROID_STACK					:= true
 
 # --- Multimedia & Graphics ---
@@ -107,7 +106,7 @@ TARGET_FORCE_CPU_TYPE						:= true
 BOARD_VOLD_EMMC_SHARES_DEV_MAJOR			:= true
 BOARD_UMS_LUNFILE							:= "/sys/class/android_usb/f_mass_storage/lun/file"
 TARGET_USE_CUSTOM_LUN_FILE_PATH				:= "/sys/class/android_usb/f_mass_storage/lun/file"
-BOARD_HARDWARE_CLASS						:= $(COMMON_PATH)/cmhw/
+BOARD_HARDWARE_CLASS						:= $(DEVICE_PATH)/cmhw/
 TARGET_INIT_VENDOR_LIB						:= libinit_omap3
 
 USE_OPENGL_RENDERER							:= true
@@ -121,16 +120,16 @@ TARGET_RUNNING_WITHOUT_SYNC_FRAMEWORK		:= true
 
 # Release tool
 TARGET_PROVIDES_RELEASETOOLS				:= true
-TARGET_RELEASETOOL_OTA_FROM_TARGET_SCRIPT	:= build/tools/releasetools/ota_from_target_files --device_specific $(COMMON_PATH)/releasetools/shadow-common_ota_from_target_files.py
+TARGET_RELEASETOOL_OTA_FROM_TARGET_SCRIPT	:= build/tools/releasetools/ota_from_target_files --device_specific $(DEVICE_PATH)/releasetools/shadow-common_ota_from_target_files.py
 TARGET_SYSTEMIMAGE_USE_SQUISHER				:= true
 
 # --- Recovery & TWRP ---
 RECOVERY_VARIANT							:= twrp
 RECOVERY_BOOTABLE_PATH						:= bootable/recovery-twrp
 TARGET_RECOVERY_UI_LIB						:= librecovery_ui_default
-TARGET_RECOVERY_FSTAB						:= $(COMMON_PATH)/recovery/twrp.fstab
+TARGET_RECOVERY_FSTAB						:= $(DEVICE_PATH)/recovery/twrp.fstab
 RECOVERY_FSTAB_VERSION						:= 2
-TARGET_RECOVERY_INITRC						:= $(COMMON_PATH)/ramdisk/init.recovery.shadow.rc
+TARGET_RECOVERY_INITRC						:= $(DEVICE_PATH)/ramdisk/init.recovery.shadow.rc
 BOARD_HAS_LARGE_FILESYSTEM					:= true
 # DEVICE_RESOLUTION							:= 480x854
 TW_THEME									:= portrait_hdpi
@@ -163,8 +162,9 @@ TARGET_RECOVERY_PRE_COMMAND 				:= "echo recovery > /cache/recovery/bootmode.con
 TARGET_RECOVERY_PRE_COMMAND_CLEAR_REASON 	:= true
 
 # --- Kernel Configuration ---
-TARGET_KERNEL_SOURCE						:= kernel/motorola/folder/shadow-kernel
+TARGET_KERNEL_SOURCE						:= kernel/motorola/shadow
 BOARD_KERNEL_IMAGE_NAME						:= zImage
+TARGET_KERNEL_CONFIG						:= shadow_cm11_defconfig
 KERNEL_OUT									:= $(abspath $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ)
 
 # Toolchain setup for GCC 4.4.3
@@ -175,7 +175,7 @@ TARGET_KERNEL_MODULES_TOOLCHAIN				:= $(KERNEL_TOOLCHAIN)/arm-eabi-
 BOARD_COMMON_KERNEL_CMDLINE					:= console=/dev/null mem=499M init=/init omapfb.vram=0:4M usbcore.old_scheme_first=y androidboot.bootloader=3004 androidboot.mode=normal
 BOARD_RECOVERY_KERNEL_CMDLINE				:= $(BOARD_COMMON_KERNEL_CMDLINE) androidboot.serialno=DROIDX
 BOARD_KERNEL_CMDLINE						:= $(BOARD_COMMON_KERNEL_CMDLINE) panic=30 mmcparts=mmcblk1:p20(kpanic) cpcap_charger_enabled=n
-TARGET_PREBUILT_RECOVERY_KERNEL				:= $(COMMON_PATH)/bootstrap/2nd-boot/zImage-recovery
+TARGET_PREBUILT_RECOVERY_KERNEL				:= $(DEVICE_PATH)/bootstrap/2nd-boot/zImage-recovery
 
 KERNEL_MAKE_FLAGS += \
     ARCH=arm \
@@ -183,15 +183,15 @@ KERNEL_MAKE_FLAGS += \
     CC=$(TARGET_KERNEL_MODULES_TOOLCHAIN)gcc
 
 # --- Custom Module Build Logic ---
-TARGET_KERNEL_MODULES_EXT					:= $(COMMON_PATH)/modules/sources/
+TARGET_KERNEL_MODULES_EXT					:= $(DEVICE_PATH)/modules/sources/
 TARGET_KERNEL_MODULES						:= ext_modules hboot WLAN_MODULES
 
 ext_modules:
 	$(hide) mkdir -p $(KERNEL_MODULES_OUT)
-	$(hide) mkdir -p $(COMMON_PATH)/modules/prebuilt
+	$(hide) mkdir -p $(DEVICE_PATH)/modules/prebuilt
 	@echo "--- Compiling and Gathering Shadow Modules ---"
 	$(hide) $(MAKE) -C $(TARGET_KERNEL_MODULES_EXT) modules KERNEL_DIR=$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=$(TARGET_KERNEL_MODULES_TOOLCHAIN)
-	$(hide) find $(TARGET_KERNEL_MODULES_EXT) -name "*.ko" -exec cp -v {} $(COMMON_PATH)/modules/prebuilt/ \;
+	$(hide) find $(TARGET_KERNEL_MODULES_EXT) -name "*.ko" -exec cp -v {} $(DEVICE_PATH)/modules/prebuilt/ \;
 	$(hide) cp -v $(KERNEL_OUT)/drivers/video/output.ko $(KERNEL_MODULES_OUT)/ || echo "output.ko not found in KERNEL_OUT"
 	$(hide) find $(TARGET_KERNEL_MODULES_EXT) -name "*.ko" -exec cp -v {} $(KERNEL_MODULES_OUT)/ \;
 	$(hide) find $(KERNEL_MODULES_OUT)/ -name "*.ko" -exec $(TARGET_KERNEL_MODULES_TOOLCHAIN)strip --strip-unneeded {} + || true
@@ -218,10 +218,10 @@ hboot: $(INSTALLED_KERNEL_TARGET)
 	$(hide) mkdir -p $(PRODUCT_OUT)/system/bootstrap/2nd-boot
 	$(hide) echo "$(BOARD_KERNEL_CMDLINE)" > $(PRODUCT_OUT)/system/bootstrap/2nd-boot/cmdline
 	$(hide) echo "$(BOARD_RECOVERY_KERNEL_CMDLINE)" > $(PRODUCT_OUT)/system/bootstrap/2nd-boot/cmdline-recovery
-	$(hide) $(MAKE) -C $(COMMON_PATH)/bootstrap/hboot ARCH=arm CROSS_COMPILE=$(TARGET_KERNEL_MODULES_TOOLCHAIN)
-	$(hide) cp $(COMMON_PATH)/bootstrap/hboot/hboot.bin $(PRODUCT_OUT)/system/bootstrap/2nd-boot/
+	$(hide) $(MAKE) -C $(DEVICE_PATH)/bootstrap/hboot ARCH=arm CROSS_COMPILE=$(TARGET_KERNEL_MODULES_TOOLCHAIN)
+	$(hide) cp $(DEVICE_PATH)/bootstrap/hboot/hboot.bin $(PRODUCT_OUT)/system/bootstrap/2nd-boot/
 	$(hide) cp $(KERNEL_OUT)/arch/arm/boot/zImage $(PRODUCT_OUT)/system/bootstrap/2nd-boot/zImage
-	$(hide) cp $(COMMON_PATH)/bootstrap/2nd-boot/zImage-recovery $(PRODUCT_OUT)/system/bootstrap/2nd-boot/zImage-recovery
+	$(hide) cp $(DEVICE_PATH)/bootstrap/2nd-boot/zImage-recovery $(PRODUCT_OUT)/system/bootstrap/2nd-boot/zImage-recovery
 	@echo "--- Bootstrap files placed in $(PRODUCT_OUT)/system/bootstrap/2nd-boot ---"
 
 $(INSTALLED_SYSTEMIMAGE_TARGET): ext_modules WLAN_MODULES hboot
