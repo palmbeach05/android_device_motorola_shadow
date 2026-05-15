@@ -19,6 +19,8 @@ $(call inherit-product, vendor/motorola/shadow-common/shadow-vendor.mk)
 DEVICE_PACKAGE_OVERLAYS += $(DEVICE_PATH)/overlay
 
 # System properties
+-include $(LOCAL_PATH)/system_prop.mk
+
 PLATFORM_BASE_OS := 4.4.4
 PRODUCT_PROPERTY_OVERRIDES += \
 	dalvik.vm.debug.alloc=0 \
@@ -151,6 +153,7 @@ PRODUCT_COPY_FILES += \
     $(DEVICE_PATH)/prebuilt/etc/gpsconfig.xml:system/etc/gpsconfig.xml \
     $(DEVICE_PATH)/prebuilt/etc/location.cfg:system/etc/location.cfg \
     $(DEVICE_PATH)/prebuilt/etc/media_codecs.xml:system/etc/media_codecs.xml \
+    $(DEVICE_PATH)/prebuilt/etc/media_profiles.xml:system/etc/media_profiles.xml \
     $(DEVICE_PATH)/prebuilt/etc/audio_policy.conf:system/etc/audio_policy.conf \
     $(DEVICE_PATH)/prebuilt/etc/apns-conf.xml:system/etc/apns-conf.xml
 

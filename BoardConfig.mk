@@ -79,18 +79,15 @@ BOARD_HOSTAPD_DRIVER						:= NL80211
 BOARD_HOSTAPD_PRIVATE_LIB					:= lib_driver_cmd_wl12xx
 PRODUCT_WIRELESS_TOOLS						:= true
 BOARD_WIFI_SKIP_CAPABILITIES				:= true
-
-ifeq ($(TARGET_USE_KERNEL_BACKPORTS),true)
-    WIFI_DRIVER_MODULE_PATH					:= "/system/lib/modules/wlcore_sdio.ko"
-    WIFI_DRIVER_MODULE_NAME					:= "wlcore_sdio"
-else
-    WIFI_DRIVER_MODULE_PATH					:= "/system/lib/modules/wl12xx_sdio.ko"
-    WIFI_DRIVER_MODULE_NAME					:= "wl12xx_sdio"
-endif
-
 BOARD_HAVE_BLUETOOTH						:= true
-BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR := $(DEVICE_PATH)/bluetooth_bluedroid
+BOARD_BLUETOOTH_BDROID_BUILDCFG_INCLUDE_DIR	:= $(DEVICE_PATH)/bluetooth
 TARGET_USE_BLUEDROID_STACK					:= true
+WIFI_DRIVER_MODULE_PATH						:= "/system/lib/modules/wl12xx_sdio.ko"
+WIFI_DRIVER_MODULE_NAME						:= "wl12xx_sdio"
+
+# Init
+TARGET_INIT_VENDOR_LIB						:= libinit_omap3
+TARGET_LIBINIT_DEFINES_FILE					:= $(DEVICE_PATH)/init/init_omap3.c
 
 # --- Multimedia & Graphics ---
 HARDWARE_OMX								:= true
@@ -107,14 +104,13 @@ BOARD_VOLD_EMMC_SHARES_DEV_MAJOR			:= true
 BOARD_UMS_LUNFILE							:= "/sys/class/android_usb/f_mass_storage/lun/file"
 TARGET_USE_CUSTOM_LUN_FILE_PATH				:= "/sys/class/android_usb/f_mass_storage/lun/file"
 BOARD_HARDWARE_CLASS						:= $(DEVICE_PATH)/cmhw/
-TARGET_INIT_VENDOR_LIB						:= libinit_omap3
 
 USE_OPENGL_RENDERER							:= true
 BOARD_USE_YUV422I_DEFAULT_COLORFORMAT		:= true
 MAX_EGL_CACHE_SIZE							:= 2097152
 MAX_EGL_CACHE_KEY_SIZE						:= 4096
 
-# Triple Buffering helps KitKat fluidity on OMAP3
+# Triple Buffering
 NUM_FRAMEBUFFER_SURFACE_BUFFERS				:= 3
 TARGET_RUNNING_WITHOUT_SYNC_FRAMEWORK		:= true
 
@@ -151,8 +147,7 @@ TW_BRIGHTNESS_PATH							:= /sys/class/leds/lcd-backlight/brightness
 TW_MAX_BRIGHTNESS							:= 255
 TW_CUSTOM_CPU_TEMP_PATH						:= "/sys/devices/platform/cpcap_battery/power_supply/battery/temp"
 ALLOW_MISSING_DEPENDENCIES					:= true
-TARGET_RECOVERY_DEVICE_MODULES += \
-	recovery_tzdata
+TARGET_RECOVERY_DEVICE_MODULES				+= recovery_tzdata
 TARGET_NO_SEPARATE_RECOVERY					:= true
 TW_EXCLUDE_SUPERSU							:= true
 TW_EXCLUDE_ENCRYPTED_BACKUPS				:= true
@@ -160,41 +155,52 @@ TARGET_RECOVERY_UPDATER_EXTRA_LIBS			+= libext4_utils_static libsparse_static li
 TW_INPUT_BLACKLIST							:= "h2w"
 TARGET_RECOVERY_PRE_COMMAND 				:= "echo recovery > /cache/recovery/bootmode.conf; sync;"
 TARGET_RECOVERY_PRE_COMMAND_CLEAR_REASON 	:= true
+BOARD_ALWAYS_INSECURE						:= true
 
 # --- Kernel Configuration ---
 TARGET_KERNEL_SOURCE						:= kernel/motorola/shadow
 BOARD_KERNEL_IMAGE_NAME						:= zImage
 TARGET_KERNEL_CONFIG						:= shadow_cm11_defconfig
+TARGET_PREBUILT_RECOVERY_KERNEL				:= $(DEVICE_PATH)/bootstrap/2nd-boot/zImage-recovery
 KERNEL_OUT									:= $(abspath $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ)
+
+BOARD_COMMON_KERNEL_CMDLINE	:= \
+	console=/dev/null \
+	mem=499M \
+	init=/init \
+	omapfb.vram=0:4M \
+	usbcore.old_scheme_first=y \
+	androidboot.bootloader=3004 \
+	androidboot.mode=normal
+BOARD_KERNEL_CMDLINE := \
+	$(BOARD_COMMON_KERNEL_CMDLINE) \
+	panic=30 \
+	mmcparts=mmcblk1:p20(kpanic) \
+	cpcap_charger_enabled=n
+BOARD_RECOVERY_KERNEL_CMDLINE := \
+	$(BOARD_COMMON_KERNEL_CMDLINE) \
+	androidboot.serialno=DROIDX
 
 # Toolchain setup for GCC 4.4.3
 TARGET_KERNEL_CUSTOM_TOOLCHAIN				:= arm-eabi-4.4.3
 KERNEL_TOOLCHAIN							:= $(ANDROID_BUILD_TOP)/prebuilt/linux-x86/toolchain/$(TARGET_KERNEL_CUSTOM_TOOLCHAIN)/bin
-TARGET_KERNEL_MODULES_TOOLCHAIN				:= $(KERNEL_TOOLCHAIN)/arm-eabi-
-
-BOARD_COMMON_KERNEL_CMDLINE					:= console=/dev/null mem=499M init=/init omapfb.vram=0:4M usbcore.old_scheme_first=y androidboot.bootloader=3004 androidboot.mode=normal
-BOARD_RECOVERY_KERNEL_CMDLINE				:= $(BOARD_COMMON_KERNEL_CMDLINE) androidboot.serialno=DROIDX
-BOARD_KERNEL_CMDLINE						:= $(BOARD_COMMON_KERNEL_CMDLINE) panic=30 mmcparts=mmcblk1:p20(kpanic) cpcap_charger_enabled=n
-TARGET_PREBUILT_RECOVERY_KERNEL				:= $(DEVICE_PATH)/bootstrap/2nd-boot/zImage-recovery
-
-KERNEL_MAKE_FLAGS += \
-    ARCH=arm \
-    CROSS_COMPILE=$(TARGET_KERNEL_MODULES_TOOLCHAIN) \
-    CC=$(TARGET_KERNEL_MODULES_TOOLCHAIN)gcc
+KERNEL_CROSS_COMPILE 						:= $(KERNEL_TOOLCHAIN)/arm-eabi-
+KERNEL_MAKE_FLAGS							+= ARCH=arm CROSS_COMPILE=$(KERNEL_CROSS_COMPILE) CC=$(KERNEL_CROSS_COMPILE)gcc
 
 # --- Custom Module Build Logic ---
 TARGET_KERNEL_MODULES_EXT					:= $(DEVICE_PATH)/modules/sources/
-TARGET_KERNEL_MODULES						:= ext_modules hboot WLAN_MODULES
+TARGET_KERNEL_MODULES						:= ext_modules WLAN_MODULES hboot
 
 ext_modules:
 	$(hide) mkdir -p $(KERNEL_MODULES_OUT)
 	$(hide) mkdir -p $(DEVICE_PATH)/modules/prebuilt
 	@echo "--- Compiling and Gathering Shadow Modules ---"
-	$(hide) $(MAKE) -C $(TARGET_KERNEL_MODULES_EXT) modules KERNEL_DIR=$(KERNEL_OUT) ARCH=arm CROSS_COMPILE=$(TARGET_KERNEL_MODULES_TOOLCHAIN)
+	$(hide) $(MAKE) -C $(TARGET_KERNEL_MODULES_EXT) modules KERNEL_DIR=$(KERNEL_OUT) $(KERNEL_MAKE_FLAGS)
 	$(hide) find $(TARGET_KERNEL_MODULES_EXT) -name "*.ko" -exec cp -v {} $(DEVICE_PATH)/modules/prebuilt/ \;
 	$(hide) cp -v $(KERNEL_OUT)/drivers/video/output.ko $(KERNEL_MODULES_OUT)/ || echo "output.ko not found in KERNEL_OUT"
 	$(hide) find $(TARGET_KERNEL_MODULES_EXT) -name "*.ko" -exec cp -v {} $(KERNEL_MODULES_OUT)/ \;
-	$(hide) find $(KERNEL_MODULES_OUT)/ -name "*.ko" -exec $(TARGET_KERNEL_MODULES_TOOLCHAIN)strip --strip-unneeded {} + || true
+	$(hide) find $(KERNEL_MODULES_OUT)/ -name "*.ko" -exec $(KERNEL_CROSS_COMPILE)strip --strip-unneeded {} + || true
+	$(hide) find $(KERNEL_MODULES_OUT) -name "*.ko" -exec chmod 0644 {} \;
 
 WLAN_MODULES:
 	$(hide) mkdir -p $(KERNEL_MODULES_OUT)
@@ -204,21 +210,22 @@ WLAN_MODULES:
 		KLIB=$(abspath $(KERNEL_OUT)) \
 		KLIB_BUILD=$(abspath $(KERNEL_OUT)) \
 		ARCH=arm \
-		CROSS_COMPILE=$(abspath $(TARGET_KERNEL_MODULES_TOOLCHAIN)) \
+		CROSS_COMPILE=$(KERNEL_CROSS_COMPILE) \
 		EXTRA_CFLAGS="-fno-strict-aliasing"
 	$(hide) cp hardware/ti/wlan/mac80211/compat_wl12xx/compat/compat.ko $(KERNEL_MODULES_OUT)/
 	$(hide) cp hardware/ti/wlan/mac80211/compat_wl12xx/net/mac80211/mac80211.ko $(KERNEL_MODULES_OUT)/
 	$(hide) cp hardware/ti/wlan/mac80211/compat_wl12xx/net/wireless/cfg80211.ko $(KERNEL_MODULES_OUT)/
 	$(hide) cp hardware/ti/wlan/mac80211/compat_wl12xx/drivers/net/wireless/wl12xx/wl12xx.ko $(KERNEL_MODULES_OUT)/
 	$(hide) cp hardware/ti/wlan/mac80211/compat_wl12xx/drivers/net/wireless/wl12xx/wl12xx_sdio.ko $(KERNEL_MODULES_OUT)/
-	$(hide) find $(KERNEL_MODULES_OUT) -name "*.ko" -exec $(TARGET_KERNEL_MODULES_TOOLCHAIN)strip --strip-unneeded {} + || true
+	$(hide) find $(KERNEL_MODULES_OUT) -name "*.ko" -exec $(KERNEL_CROSS_COMPILE)strip --strip-unneeded {} + || true
+	$(hide) find $(KERNEL_MODULES_OUT) -name "*.ko" -exec chmod 0644 {} \;
 
 hboot: $(INSTALLED_KERNEL_TARGET)
 	@echo "--- Building Shadow Hboot Bootstrap ---"
 	$(hide) mkdir -p $(PRODUCT_OUT)/system/bootstrap/2nd-boot
 	$(hide) echo "$(BOARD_KERNEL_CMDLINE)" > $(PRODUCT_OUT)/system/bootstrap/2nd-boot/cmdline
 	$(hide) echo "$(BOARD_RECOVERY_KERNEL_CMDLINE)" > $(PRODUCT_OUT)/system/bootstrap/2nd-boot/cmdline-recovery
-	$(hide) $(MAKE) -C $(DEVICE_PATH)/bootstrap/hboot ARCH=arm CROSS_COMPILE=$(TARGET_KERNEL_MODULES_TOOLCHAIN)
+	$(hide) $(MAKE) -C $(DEVICE_PATH)/bootstrap/hboot $(KERNEL_MAKE_FLAGS)
 	$(hide) cp $(DEVICE_PATH)/bootstrap/hboot/hboot.bin $(PRODUCT_OUT)/system/bootstrap/2nd-boot/
 	$(hide) cp $(KERNEL_OUT)/arch/arm/boot/zImage $(PRODUCT_OUT)/system/bootstrap/2nd-boot/zImage
 	$(hide) cp $(DEVICE_PATH)/bootstrap/2nd-boot/zImage-recovery $(PRODUCT_OUT)/system/bootstrap/2nd-boot/zImage-recovery
