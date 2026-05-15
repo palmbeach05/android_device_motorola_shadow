@@ -44,8 +44,8 @@ on fs
 	swapon_all /fstab.mapphone_cdma # For enabling zRam
 
 	mount ext3 /dev/block/mmcblk1p23 /system/lib noatime nodiratime barrier=1
-	chmod 0755 /system/lib
 	chown root root /system/lib
+	chmod 0755 /system/lib
 
 	mkdir /pds 0775 system system
 	exec /system/bootstrap/script/pdsbackup.sh
@@ -56,11 +56,33 @@ on fs
 	symlink /dev/block/mmcblk1p24 /dev/block/userdata
 
 on post-fs
-	# Load generic modules and WiFi drivers
+	# Load and set permissions for generic modules and WiFi drivers
+	mount -o remount,rw /system/lib
+	chown root root /system/lib/modules/backlight.ko
+	chmod 0644 /system/lib/modules/backlight.ko
+	chown root root /system/lib/modules/cfg80211.ko
+	chmod 0644 /system/lib/modules/cfg80211.ko
+	chown root root /system/lib/modules/compat.ko
+	chmod 0644 /system/lib/modules/compat.ko
+	chown root root /system/lib/modules/cpufreq_stats.ko
+	chmod 0644 /system/lib/modules/cpufreq_stats.ko
+	chown root root /system/lib/modules/mac80211.ko
+	chmod 0644 /system/lib/modules/mac80211.ko
+	chown root root /system/lib/modules/output.ko
+	chmod 0644 /system/lib/modules/output.ko
+	chown root root /system/lib/modules/overclock_defy.ko
+	chmod 0644 /system/lib/modules/overclock_defy.ko
+	chown root root /system/lib/modules/symsearch.ko
+	chmod 0644 /system/lib/modules/symsearch.ko
+	chown root root /system/lib/modules/wl12xx.ko
+	chmod 0644 /system/lib/modules/wl12xx.ko
+	chown root root /system/lib/modules/wl12xx_sdio.ko
+	chmod 0644 /system/lib/modules/wl12xx_sdio.ko
 	insmod /system/lib/modules/compat.ko
 	insmod /system/lib/modules/cfg80211.ko
 	insmod /system/lib/modules/mac80211.ko
 	insmod /system/lib/modules/wl12xx.ko
+	insmod /system/lib/modules/wl12xx_sdio.ko
 	mount rootfs rootfs / rw remount
 
 	# Mount cdrom
@@ -70,8 +92,8 @@ on post-fs
 	# Mount tmp, we dont have swap, use ramfs which can grow if required
 	mkdir /tmp
 	mount ramfs ramfs /tmp size=256k relatime
-	chmod 0777 /tmp
 	chown system shell /tmp
+	chmod 0777 /tmp
 
 	# Configure kernel options
 	# Disable automatic power control for OHCI USB IPC Temporarily
@@ -89,8 +111,8 @@ on post-fs
 
 	# Change vibrator ownership
 	chown system system /sys/class/timed_output/vibrator/enable
-	chown system system /sys/class/timed_output/vibrator/sweep
 	chmod 0660 /sys/class/timed_output/vibrator/enable
+	chown system system /sys/class/timed_output/vibrator/sweep
 	chmod 0660 /sys/class/timed_output/vibrator/sweep
 
 	# Bluetooth power up/down interface (wl127x Bluetooth and hci0)
