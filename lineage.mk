@@ -14,9 +14,12 @@
 # limitations under the License.
 #
 
+DEVICE_PATH := device/motorola/shadow
+
 # Inherit some common CM stuff
 $(call inherit-product, vendor/cm/config/common_full_phone.mk)
 $(call inherit-product, vendor/cm/config/cdma.mk)
+$(call inherit-product, $(DEVICE_PATH)/shadow.mk)
 
 # --- Product Identity ---
 PRODUCT_NAME := lineage_shadow

@@ -24,4 +24,4 @@ LOCAL_MODULE_PATH := $(TARGET_RECOVERY_ROOT_OUT)/usr/share/zoneinfo
 LOCAL_SRC_FILES := ../../../bionic/libc/zoneinfo/tzdata
 include $(BUILD_PREBUILT)
 
-include $(call all-makefiles-under,$(COMMON_PATH))
+include $(call all-makefiles-under,$(DEVICE_PATH))

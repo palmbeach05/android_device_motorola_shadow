@@ -58,26 +58,8 @@ on fs
 on post-fs
 	# Load and set permissions for generic modules and WiFi drivers
 	mount -o remount,rw /system/lib
-	chown root root /system/lib/modules/backlight.ko
-	chmod 0644 /system/lib/modules/backlight.ko
-	chown root root /system/lib/modules/cfg80211.ko
-	chmod 0644 /system/lib/modules/cfg80211.ko
-	chown root root /system/lib/modules/compat.ko
-	chmod 0644 /system/lib/modules/compat.ko
-	chown root root /system/lib/modules/cpufreq_stats.ko
-	chmod 0644 /system/lib/modules/cpufreq_stats.ko
-	chown root root /system/lib/modules/mac80211.ko
-	chmod 0644 /system/lib/modules/mac80211.ko
-	chown root root /system/lib/modules/output.ko
-	chmod 0644 /system/lib/modules/output.ko
-	chown root root /system/lib/modules/overclock_defy.ko
-	chmod 0644 /system/lib/modules/overclock_defy.ko
-	chown root root /system/lib/modules/symsearch.ko
-	chmod 0644 /system/lib/modules/symsearch.ko
-	chown root root /system/lib/modules/wl12xx.ko
-	chmod 0644 /system/lib/modules/wl12xx.ko
-	chown root root /system/lib/modules/wl12xx_sdio.ko
-	chmod 0644 /system/lib/modules/wl12xx_sdio.ko
+	chmod 0644 /system/lib/modules/*.ko
+	chown root root /system/lib/modules/*.ko
 	insmod /system/lib/modules/compat.ko
 	insmod /system/lib/modules/cfg80211.ko
 	insmod /system/lib/modules/mac80211.ko
