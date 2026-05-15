@@ -109,3 +109,6 @@ PRODUCT_PROPERTY_OVERRIDES += \
     ro.service.start.smc=1 \
     log.tag.launcher_force_rotate=VERBOSE \
     lockscreen.rot_override=true
+
+ADDITIONAL_DEFAULT_PROPERTIES += \
+    ro.secure=0

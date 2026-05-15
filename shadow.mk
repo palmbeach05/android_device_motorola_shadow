@@ -120,6 +120,7 @@ PRODUCT_PACKAGES += \
     HwaSettings \
     MotoFM \
     MotoFMService \
+    Torch \
     safestrapmenu
 
 # Webview & System Components
