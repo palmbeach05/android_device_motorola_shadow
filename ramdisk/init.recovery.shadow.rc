@@ -1,0 +1,95 @@
+on early-init
+    start ueventd
+
+on init
+    export PATH /sbin:/bin:/system/bin
+    export LD_LIBRARY_PATH .:/sbin
+    export ANDROID_ROOT /system
+    export ANDROID_DATA /data
+    export EXTERNAL_STORAGE /external_sd
+
+    export ZONEINFO /usr/share/zoneinfo
+    export ZONEINFO /system/usr/share/zoneinfo
+
+    symlink /system/etc /etc
+
+    mkdir /system
+    mkdir /sdcard
+    mkdir /sd-ext
+    mkdir /preinstall
+    mkdir /data
+    mkdir /cache
+
+    mkdir /system/usr 0755 root root
+    mkdir /system/usr/share 0755 root root
+    mkdir /system/usr/share/zoneinfo
+    chmod 0755 /system/usr/share/zoneinfo
+    chown root root /system/usr/share/zoneinfo
+    mount tmpfs tmpfs /system/usr/share/zoneinfo mode=0755
+    symlink /usr/share/zoneinfo/tzdata /system/usr/share/zoneinfo/tzdata
+    chmod 0644 /usr/share/zoneinfo/tzdata
+    chown root root /usr/share/zoneinfo/tzdata
+
+# TWRP Thermal fix
+    wait /sys/devices/platform/cpcap_battery/power_supply/battery/temp
+    symlink /sys/devices/platform/cpcap_battery/power_supply/battery/temp /tmp/cpusensor
+
+# Ensure misc partition node is ready for TWRP
+    wait /dev/block/mmcblk1p18
+    symlink /dev/block/mmcblk1p18 /dev/block/misc
+
+# Mount tmp, we dont have swap, use ramfs which can grow if required
+    mkdir /tmp
+    mount tmpfs tmpfs /tmp size=16m relatime
+    chmod 0777 /tmp
+    chown system shell /tmp
+    mkdir /sideload
+    mkdir /tmp/sideload 0777 root root
+
+# Configure kernel options
+    write /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor performance
+
+    setprop ro.serialno ${ro.boot.serialno}
+
+    write /sys/class/android_usb/android0/enable 0
+    write /sys/class/android_usb/android0/idVendor 22b8
+    write /sys/class/android_usb/android0/idProduct 4301
+    write /sys/class/android_usb/android0/iManufacturer ${ro.product.manufacturer}
+    write /sys/class/android_usb/android0/iProduct ${ro.product.model}
+    write /sys/class/android_usb/android0/iSerial ${ro.serialno}
+    write /sys/class/android_usb/android0/functions mass_storage,adb
+    write /sys/class/android_usb/android0/enable 1
+
+on boot
+
+    ifup lo
+    hostname localhost
+    domainname localdomain
+
+    class_start default
+
+service ueventd /sbin/ueventd
+    critical
+
+service recovery /sbin/recovery
+
+service adbd /sbin/adbd recovery
+    disabled
+
+# Always start adbd on userdebug and eng builds
+on property:ro.debuggable=1
+    write /sys/class/android_usb/android0/enable 1
+    start adbd
+    setprop service.adb.root 1
+
+# Restart adbd so it can run as root
+on property:service.adb.root=1
+    write /sys/class/android_usb/android0/enable 0
+    restart adbd
+    write /sys/class/android_usb/android0/enable 1
+
+    # Ensure graphics nodes are reachable before UI starts
+    symlink /dev/graphics/fb0 /dev/fb0
+
+on property:sys.powerctl=*
+   powerctl ${sys.powerctl}
