@@ -41,10 +41,10 @@ PRODUCT_AAPT_PREF_CONFIG := hdpi
 # --- Hardware Blobs & Firmware ---
 # --- Connectivity (WLAN/BT Firmware) ---
 PRODUCT_COPY_FILES += \
-    $(DEVICE_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin \
-    $(DEVICE_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin \
-    $(DEVICE_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin \
-    $(DEVICE_PATH)/prebuilt/etc/firmware/ti-connectivity/wl1271-nvs.bin:system/etc/firmware/ti-connectivity/wl1271-nvs.bin \
+    $(DEVICE_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-5-mr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-mr.bin \
+    $(DEVICE_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-5-plt.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-plt.bin \
+    $(DEVICE_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-fw-5-sr.bin:system/etc/firmware/ti-connectivity/wl127x-fw-4-sr.bin \
+    $(DEVICE_PATH)/prebuilt/etc/firmware/ti-connectivity/wl127x-nvs.bin:system/etc/firmware/ti-connectivity/wl1271-nvs.bin \
     $(DEVICE_PATH)/prebuilt/etc/firmware/TIInit_7.6.15.bts:system/etc/firmware/TIInit_7.6.15.bts \
     $(DEVICE_PATH)/prebuilt/etc/wifi/wpa_supplicant_overlay.conf:system/etc/wifi/wpa_supplicant_overlay.conf \
     $(DEVICE_PATH)/prebuilt/etc/wifi/p2p_supplicant_overlay.conf:system/etc/wifi/p2p_supplicant_overlay.conf \
