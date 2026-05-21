@@ -43,10 +43,10 @@ on fs
 	mount_all ./fstab.mapphone_cdma
 	swapon_all /fstab.mapphone_cdma # For enabling zRam
 
-	mount ext3 /dev/block/mmcblk1p23 /system/lib noatime nodiratime barrier=1
-	chown root root /system/lib
-	chmod 0755 /system/lib
-
+	mount ext3 /dev/block/mmcblk1p23 /preinstall noatime nodiratime barrier=1
+	chown system system /preinstall
+	chmod 0755 /preinstall
+	
 	mkdir /pds 0775 system system
 	exec /system/bootstrap/script/pdsbackup.sh
 
@@ -57,7 +57,8 @@ on fs
 
 on post-fs
 	# Load and set permissions for generic modules and WiFi drivers
-	mount -o remount,rw /system/lib
+	# and set blind mounts
+	mount -o remount,rw /system
 	chmod 0644 /system/lib/modules/*.ko
 	chown root root /system/lib/modules/*.ko
 	insmod /system/lib/modules/compat.ko
@@ -66,6 +67,10 @@ on post-fs
 	insmod /system/lib/modules/wl12xx.ko
 	insmod /system/lib/modules/wl12xx_sdio.ko
 	mount rootfs rootfs / rw remount
+
+	mount none /preinstall/media /system/media bind
+	mount none /preinstall/fonts /system/fonts bind
+	mount none /preinstall/usr /system/usr bind
 
 	# Mount cdrom
 	mkdir /cdrom 0770 system system
