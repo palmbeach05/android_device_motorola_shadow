@@ -1,18 +1,18 @@
-How to compile jordan kernel modules
+How to compile Droid X kernel modules
 ------------------------------------
 
-These external kernel modules require the Defy kernel tree :
+These external kernel modules require the Droid X kernel tree :
 
-It is available at https://github.com/CyanogenDefy/kernel-omap
+It is available at https://github.com/palmbeach05/shadow-kernel
 
-Add to your repo manifest \<project path="kernel/moto/mb525" name="CyanogenDefy/kernel-omap" />
+Add to your repo manifest \<project path="kernel/motorola/shadow-kernel" name="palmbeach05/shadow-kernel" />
 
 ---
 
 "repo sync" and then, in root of your android repo :
 
     . build/envsetup.sh
-    breakfast jordan
+    breakfast shadow
     
     make kernel
     make device_modules

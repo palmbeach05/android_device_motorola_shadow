@@ -23,7 +23,7 @@
 namespace android_audio_legacy {
 
 // ----------------------------------------------------------------------------
-// AudioPolicyManager for jordan platform
+// AudioPolicyManager for Motorola Droid X
 // Common audio policy manager code is implemented in AudioPolicyManagerBase class
 // ----------------------------------------------------------------------------
 

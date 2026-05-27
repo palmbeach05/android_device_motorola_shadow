@@ -30,15 +30,15 @@ on init
     chmod 0644 /usr/share/zoneinfo/tzdata
     chown root root /usr/share/zoneinfo/tzdata
 
-# TWRP Thermal fix
+    # TWRP Thermal fix
     wait /sys/devices/platform/cpcap_battery/power_supply/battery/temp
     symlink /sys/devices/platform/cpcap_battery/power_supply/battery/temp /tmp/cpusensor
 
-# Ensure misc partition node is ready for TWRP
+    # Ensure misc partition node is ready for TWRP
     wait /dev/block/mmcblk1p18
     symlink /dev/block/mmcblk1p18 /dev/block/misc
 
-# Mount tmp, we dont have swap, use ramfs which can grow if required
+    # Mount tmp, we dont have swap, use ramfs which can grow if required
     mkdir /tmp
     mount tmpfs tmpfs /tmp size=16m relatime
     chmod 0777 /tmp
@@ -46,7 +46,7 @@ on init
     mkdir /sideload
     mkdir /tmp/sideload 0777 root root
 
-# Configure kernel options
+    # Configure kernel options
     write /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor performance
 
     setprop ro.serialno ${ro.boot.serialno}
