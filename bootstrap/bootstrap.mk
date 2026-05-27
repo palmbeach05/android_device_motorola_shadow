@@ -32,7 +32,7 @@ PRODUCT_COPY_FILES += \
 	$(DEVICE_PATH)/bootstrap/modules/jbd2.ko:system/bootstrap/modules/jbd2.ko \
 	$(DEVICE_PATH)/bootstrap/modules/ext4.ko:system/bootstrap/modules/ext4.ko \
 	$(DEVICE_PATH)/bootstrap/images/background-blank.png:system/bootstrap/images/background-blank.png \
-	$(DEVICE_PATH)/twrp.fstab:recovery/root/etc/twrp.fstab \
+	$(DEVICE_PATH)/recovery/twrp.fstab:recovery/root/etc/twrp.fstab \
 	$(OUT)/ramdisk-recovery.img:system/bootstrap/2nd-boot/ramdisk-recovery \
 	$(OUT)/ramdisk.img:system/bootstrap/2nd-boot/ramdisk \
 	$(OUT)/kernel:system/bootstrap/2nd-boot/zImage

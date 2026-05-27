@@ -85,9 +85,10 @@ TARGET_USE_BLUEDROID_STACK					:= true
 WIFI_DRIVER_MODULE_PATH						:= "/system/lib/modules/wl12xx_sdio.ko"
 WIFI_DRIVER_MODULE_NAME						:= "wl12xx_sdio"
 
-# Init
+# Init & Healthd HAL
 TARGET_INIT_VENDOR_LIB						:= libinit_omap3
 TARGET_LIBINIT_DEFINES_FILE					:= $(DEVICE_PATH)/init/init_omap3.c
+BOARD_HAL_STATIC_LIBRARIES					:= libhealthd.omap3
 
 # --- Multimedia & Graphics ---
 HARDWARE_OMX								:= true
