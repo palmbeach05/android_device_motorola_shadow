@@ -24,4 +24,13 @@ LOCAL_MODULE_PATH := $(TARGET_RECOVERY_ROOT_OUT)/usr/share/zoneinfo
 LOCAL_SRC_FILES := ../../../bionic/libc/zoneinfo/tzdata
 include $(BUILD_PREBUILT)
 
+include $(CLEAR_VARS)
+LOCAL_MODULE := recovery_led_charger
+LOCAL_MODULE_STEM := led_charger.sh
+LOCAL_MODULE_TAGS := optional
+LOCAL_MODULE_CLASS := EXECUTABLES
+LOCAL_MODULE_PATH := $(TARGET_RECOVERY_ROOT_OUT)/sbin
+LOCAL_SRC_FILES := ramdisk/led_charger.sh
+include $(BUILD_PREBUILT)
+
 include $(call all-makefiles-under,$(DEVICE_PATH))

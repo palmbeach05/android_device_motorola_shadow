@@ -157,7 +157,3 @@ PRODUCT_COPY_FILES += \
     $(DEVICE_PATH)/prebuilt/etc/audio_policy.conf:system/etc/audio_policy.conf \
     $(DEVICE_PATH)/prebuilt/etc/apns-conf.xml:system/etc/apns-conf.xml
 
-# --- Time Zone data for recovery ---
-PRODUCT_COPY_FILES += \
-    bionic/libc/zoneinfo/tzdata:recovery/root/system/usr/share/zoneinfo/tzdata \
-    bionic/libc/zoneinfo/tzdata:recovery/root/usr/share/zoneinfo/tzdata
