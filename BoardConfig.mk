@@ -179,8 +179,7 @@ BOARD_KERNEL_CMDLINE := \
 	mmcparts=mmcblk1:p20(kpanic) \
 	cpcap_charger_enabled=n
 BOARD_RECOVERY_KERNEL_CMDLINE := \
-	$(BOARD_COMMON_KERNEL_CMDLINE) \
-	androidboot.serialno=DROIDX
+	$(BOARD_COMMON_KERNEL_CMDLINE)
 
 # Toolchain setup for GCC 4.4.3
 TARGET_KERNEL_CUSTOM_TOOLCHAIN				:= arm-eabi-4.4.3
