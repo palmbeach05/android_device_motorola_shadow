@@ -122,7 +122,7 @@ static void omap3_power_init(struct power_module *module)
     freq_num = str_to_tokens(freq_buf, freq_list, MAX_FREQ_NUMBER);
 
     /* Discard trailing empties */
-    while (!atoi(freq_list[freq_num - 1]) && freq_num) {
+    while (freq_num && !atoi(freq_list[freq_num - 1])) {
         freq_num--;
     }
 

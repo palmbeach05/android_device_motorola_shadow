@@ -53,7 +53,7 @@ int macro_uc(int macro, int enable) {
     int ret;
 
     int cpcap_uc = open("/dev/cpcap_uc", O_RDWR | O_NONBLOCK);
-    if (cpcap_uc <= 0) {
+    if (cpcap_uc < 0) {
         fprintf(stderr, "%s: failed, errno=%d\n", __func__, errno);
         return -errno;
     }
@@ -130,7 +130,7 @@ int main(int argc, char **argv) {
     }
 
     cpcap_fd = open("/dev/cpcap_batt", O_RDONLY | O_NONBLOCK);
-    if (cpcap_fd <= 0) {
+    if (cpcap_fd < 0) {
         return errno;
     }
 

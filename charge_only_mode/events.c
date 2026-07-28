@@ -93,7 +93,7 @@ int ev_init(void)
     int fd;
 
     int i;
-    for (i=0;;i++) {
+    for (i=0; ev_count < MAX_DEVICES; i++) {
         char fname[32];
         sprintf(fname, "/dev/input/event%d", i);
         fd = open(fname, O_RDONLY);
@@ -107,12 +107,16 @@ int ev_init(void)
 
     fd = open_uevent_socket();
     if (fd >= 0) {
-        fcntl(fd, F_SETFD, FD_CLOEXEC);
-        fcntl(fd, F_SETFL, O_NONBLOCK);
-        ev_type[ev_count] = EV_TYPE_UEVENT;
-        ev_fds[ev_count].fd = fd;
-        ev_fds[ev_count].events = POLLIN;
-        ev_count++;
+        if (ev_count < MAX_DEVICES) {
+            fcntl(fd, F_SETFD, FD_CLOEXEC);
+            fcntl(fd, F_SETFL, O_NONBLOCK);
+            ev_type[ev_count] = EV_TYPE_UEVENT;
+            ev_fds[ev_count].fd = fd;
+            ev_fds[ev_count].events = POLLIN;
+            ev_count++;
+        } else {
+            close(fd);
+        }
     }
 
     return 0;
@@ -172,12 +176,16 @@ int ev_get(int timeout_ms)
         } else if (ev_type[i] == EV_TYPE_UEVENT) {
 
             char msg[1024];
-            while ((r = recv(ev_fds[i].fd, msg, sizeof(msg), 0)) > 0)
-                ;
-            if(strstr(msg, "cpcap_battery"))
-            {
-                ALOGD("cpcap_battery UEVENT msg : %s\n", msg);
-                return EVENT_BATTERY;
+            int len = 0;
+            while ((r = recv(ev_fds[i].fd, msg, sizeof(msg) - 1, 0)) > 0)
+                len = r;
+            if (len > 0) {
+                msg[len] = '\0';
+                if(strstr(msg, "cpcap_battery"))
+                {
+                    ALOGD("cpcap_battery UEVENT msg : %s\n", msg);
+                    return EVENT_BATTERY;
+                }
             }
 
         }
