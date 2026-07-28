@@ -19,6 +19,19 @@ $BB_STATIC cp -f /system/bootstrap/binary/hbootuser $BOOT_DIR/hbootuser
 $BB_STATIC cp -f /system/bootstrap/modules/hbootmod.ko $BOOT_DIR/hbootmod.ko
 $BB_STATIC chmod 755 $BOOT_DIR/*
 
+# cmdline/cmdline-recovery are baked at build time from BoardConfig.mk and
+# are therefore identical for every device. Patch in this device's real
+# serial number here, while the property service is still up, so hboot's
+# atag builder forwards it to the kernel instead of a hardwired value.
+SERIALNO=`getprop ro.serialno`
+if [ -n "$SERIALNO" ]; then
+	CMDLINE=`$BB_STATIC cat $BOOT_DIR/cmdline`
+	$BB_STATIC echo "$CMDLINE androidboot.serialno=$SERIALNO" > $BOOT_DIR/cmdline
+
+	CMDLINE_RECOVERY=`$BB_STATIC cat $BOOT_DIR/cmdline-recovery`
+	$BB_STATIC echo "$CMDLINE_RECOVERY androidboot.serialno=$SERIALNO" > $BOOT_DIR/cmdline-recovery
+fi
+
 $BB_STATIC sync
 
 $BB_STATIC umount /acct
