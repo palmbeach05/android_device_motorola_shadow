@@ -22,8 +22,7 @@ PRODUCT_COPY_FILES += \
 PRODUCT_COPY_FILES += \
 	$(DEVICE_PATH)/bootstrap/2nd-boot/devtree:system/bootstrap/2nd-boot/devtree \
 	$(DEVICE_PATH)/bootstrap/2nd-boot/hboot.cfg:system/bootstrap/2nd-boot/hboot.cfg \
-	$(DEVICE_PATH)/bootstrap/2nd-boot/hboot_recovery.cfg:system/bootstrap/2nd-boot/hboot_recovery.cfg \
-	$(DEVICE_PATH)/bootstrap/2nd-boot/zImage-recovery:system/bootstrap/2nd-boot/zImage-recovery
+	$(DEVICE_PATH)/bootstrap/2nd-boot/hboot_recovery.cfg:system/bootstrap/2nd-boot/hboot_recovery.cfg
 
 # Bootstrap Binaries
 PRODUCT_COPY_FILES += \

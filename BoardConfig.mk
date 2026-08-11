@@ -169,7 +169,6 @@ BOARD_ALWAYS_INSECURE						:= true
 TARGET_KERNEL_SOURCE						:= kernel/motorola/shadow
 BOARD_KERNEL_IMAGE_NAME						:= zImage
 TARGET_KERNEL_CONFIG						:= shadow_cm11_defconfig
-TARGET_PREBUILT_RECOVERY_KERNEL				:= $(DEVICE_PATH)/bootstrap/2nd-boot/zImage-recovery
 KERNEL_OUT									:= $(abspath $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ)
 
 BOARD_COMMON_KERNEL_CMDLINE	:= \
@@ -237,7 +236,6 @@ hboot: $(INSTALLED_KERNEL_TARGET)
 	$(hide) $(MAKE) -C $(DEVICE_PATH)/bootstrap/hboot $(KERNEL_MAKE_FLAGS)
 	$(hide) cp $(DEVICE_PATH)/bootstrap/hboot/hboot.bin $(PRODUCT_OUT)/system/bootstrap/2nd-boot/
 	$(hide) cp $(KERNEL_OUT)/arch/arm/boot/zImage $(PRODUCT_OUT)/system/bootstrap/2nd-boot/zImage
-	$(hide) cp $(DEVICE_PATH)/bootstrap/2nd-boot/zImage-recovery $(PRODUCT_OUT)/system/bootstrap/2nd-boot/zImage-recovery
 	@echo "--- Bootstrap files placed in $(PRODUCT_OUT)/system/bootstrap/2nd-boot ---"
 
 $(INSTALLED_SYSTEMIMAGE_TARGET): ext_modules WLAN_MODULES hboot
