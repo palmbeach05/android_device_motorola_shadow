@@ -187,10 +187,9 @@ on post-fs-data
 	write /sys/devices/system/cpu/cpufreq/interactive/up_threshold_any_cpu_load 50
 	setprop vold.post_fs_data_done 1
 	
-on property:ro.ril.barcode=*
-	setprop ro.boot.serialno ${ro.ril.barcode}
+on property:ro.boot.serialno=*
 	setprop ro.serialno ${ro.boot.serialno}
-	write /sys/class/android_usb/android0/iSerial ${ro.ril.barcode}
+	write /sys/class/android_usb/android0/iSerial ${ro.boot.serialno}
 	setprop sys.usb.config adb
 
 on boot
