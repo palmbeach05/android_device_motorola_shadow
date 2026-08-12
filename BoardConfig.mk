@@ -177,7 +177,6 @@ BOARD_COMMON_KERNEL_CMDLINE	:= \
 	init=/init \
 	omapfb.vram=0:4M \
 	usbcore.old_scheme_first=y \
-	androidboot.bootloader=3004 \
 	androidboot.mode=normal
 BOARD_KERNEL_CMDLINE := \
 	$(BOARD_COMMON_KERNEL_CMDLINE) \
