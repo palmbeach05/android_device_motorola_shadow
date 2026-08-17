@@ -343,6 +343,11 @@ static camera_memory_t* genClientData(legacy_camera_device *lcdev,
     ALOGV("genClientData: offset:%#x size:%#x base:%p\n",
           (unsigned)offset, size, mHeap != NULL ? mHeap->base() : 0);
 
+    if (mHeap == NULL) {
+        ALOGE("%s: ERROR getMemory returned a NULL heap", __FUNCTION__);
+        return NULL;
+    }
+
     clientData = lcdev->request_memory(-1, size, 1, lcdev->user);
     if (clientData != NULL) {
         ALOGV("%s: clientData=%p clientData->data=%p", __FUNCTION__, clientData, clientData->data);
@@ -374,6 +379,10 @@ static void dataCallback(int32_t msgType, const sp<IMemory>& dataPtr, void* user
         ssize_t offset;
         size_t  size;
         sp<IMemoryHeap> mHeap = dataPtr->getMemory(&offset, &size);
+        if (mHeap == NULL) {
+            ALOGE("%s: ERROR getMemory returned a NULL heap", __FUNCTION__);
+            return;
+        }
         char* buffer = (char*) mHeap->getBase() + offset;
         ALOGV("CameraHAL_DataCb: preview size = %dx%d\n", lcdev->previewWidth, lcdev->previewHeight);
         processPreviewData(buffer, size, lcdev, lcdev->previewFormat);
