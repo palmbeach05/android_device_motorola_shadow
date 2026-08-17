@@ -19,6 +19,58 @@ $BB_STATIC cp -f /system/bootstrap/binary/hbootuser $BOOT_DIR/hbootuser
 $BB_STATIC cp -f /system/bootstrap/modules/hbootmod.ko $BOOT_DIR/hbootmod.ko
 $BB_STATIC chmod 755 $BOOT_DIR/*
 
+# --- Preserve stock hboot command-line parameters ---
+# Read the authoritative values from the running system's /proc/cmdline
+# (do NOT use ro.serialno / ro.boot.serialno / ro.ril.barcode / /pds, they
+# can be absent or hold stale/incorrect values) and forward only the
+# allowlisted stock tokens to both the normal and recovery hboot command
+# lines: androidboot.serialno, the final androidboot.bootloader (the stock
+# cmdline may list it more than once, e.g. androidboot.bootloader=0x0000
+# followed by androidboot.bootloader=3004; only the last one is authoritative),
+# and brdrev.
+STOCK_CMDLINE=`$BB_STATIC cat /proc/cmdline`
+
+is_valid_token() {
+    $BB_STATIC echo "$1" | $BB_STATIC grep -Eq '^[A-Za-z0-9._-]+$'
+}
+
+SERIAL=`$BB_STATIC echo "$STOCK_CMDLINE" | $BB_STATIC grep -o 'androidboot\.serialno=[^ ]*' | $BB_STATIC tail -n1 | $BB_STATIC sed 's/^androidboot\.serialno=//'`
+BOOTLOADER=`$BB_STATIC echo "$STOCK_CMDLINE" | $BB_STATIC grep -o 'androidboot\.bootloader=[^ ]*' | $BB_STATIC tail -n1 | $BB_STATIC sed 's/^androidboot\.bootloader=//'`
+BRDREV=`$BB_STATIC echo "$STOCK_CMDLINE" | $BB_STATIC grep -o 'brdrev=[^ ]*' | $BB_STATIC tail -n1 | $BB_STATIC sed 's/^brdrev=//'`
+
+PAYLOAD=""
+
+if [ -n "$SERIAL" ] && is_valid_token "$SERIAL"; then
+    PAYLOAD="$PAYLOAD androidboot.serialno=$SERIAL"
+else
+    $BB_STATIC echo "2nd-boot: missing or invalid androidboot.serialno in /proc/cmdline, skipping"
+fi
+
+if [ -n "$BOOTLOADER" ] && is_valid_token "$BOOTLOADER"; then
+    PAYLOAD="$PAYLOAD androidboot.bootloader=$BOOTLOADER"
+else
+    $BB_STATIC echo "2nd-boot: missing or invalid androidboot.bootloader in /proc/cmdline, skipping"
+fi
+
+if [ -n "$BRDREV" ] && is_valid_token "$BRDREV"; then
+    PAYLOAD="$PAYLOAD brdrev=$BRDREV"
+else
+    $BB_STATIC echo "2nd-boot: missing or invalid brdrev in /proc/cmdline, skipping"
+fi
+
+if [ -n "$PAYLOAD" ]; then
+    for CMDFILE in $BOOT_DIR/cmdline $BOOT_DIR/cmdline-recovery; do
+        BASELINE=`$BB_STATIC cat $CMDFILE`
+        NEWLINE="$BASELINE$PAYLOAD"
+        LEN=`$BB_STATIC echo -n "$NEWLINE" | $BB_STATIC wc -c`
+        if [ "$LEN" -le 1023 ]; then
+            $BB_STATIC echo "$NEWLINE" > $CMDFILE
+        else
+            $BB_STATIC echo "2nd-boot: stock payload too long for $CMDFILE, skipping stock cmdline injection"
+        fi
+    done
+fi
+
 $BB_STATIC sync
 
 $BB_STATIC umount /acct
