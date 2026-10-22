@@ -22,16 +22,15 @@ PRODUCT_COPY_FILES += \
 PRODUCT_COPY_FILES += \
 	$(DEVICE_PATH)/bootstrap/2nd-boot/devtree:system/bootstrap/2nd-boot/devtree \
 	$(DEVICE_PATH)/bootstrap/2nd-boot/hboot.cfg:system/bootstrap/2nd-boot/hboot.cfg \
-	$(DEVICE_PATH)/bootstrap/2nd-boot/hboot_recovery.cfg:system/bootstrap/2nd-boot/hboot_recovery.cfg
+	$(DEVICE_PATH)/bootstrap/2nd-boot/hboot_recovery.cfg:system/bootstrap/2nd-boot/hboot_recovery.cfg \
+	$(DEVICE_PATH)/bootstrap/2nd-boot/zImage-recovery:system/bootstrap/2nd-boot/zImage-recovery
 
 # Bootstrap Binaries
 PRODUCT_COPY_FILES += \
 	$(DEVICE_PATH)/bootstrap/binary/adbd:system/bootstrap/binary/adbd \
 	$(DEVICE_PATH)/bootstrap/binary/busybox:system/bootstrap/binary/busybox \
-	$(DEVICE_PATH)/bootstrap/binary/hbootuser:system/bootstrap/binary/hbootuser \
 	$(DEVICE_PATH)/bootstrap/binary/logwrapper:system/bin/logwrapper \
-	$(DEVICE_PATH)/bootstrap/binary/logwrapper.bin:system/bin/logwrapper.bin \
-	$(DEVICE_PATH)/bootstrap/binary/safestrapmenu:system/bootstrap/binary/safestrapmenu
+	$(DEVICE_PATH)/bootstrap/binary/logwrapper.bin:system/bin/logwrapper.bin
 
 # Bootstrap Images
 PRODUCT_COPY_FILES += \
