@@ -110,6 +110,7 @@ PRODUCT_PACKAGES += \
     calibrator \
     charge_only_mode \
     dspexec \
+    hbootuser \
     libfnc \
     mot_boot_mode \
     uim-sysfs
