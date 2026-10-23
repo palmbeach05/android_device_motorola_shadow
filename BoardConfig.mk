@@ -239,3 +239,6 @@ hboot: $(INSTALLED_KERNEL_TARGET)
 	@echo "--- Bootstrap files placed in $(PRODUCT_OUT)/system/bootstrap/2nd-boot ---"
 
 $(INSTALLED_SYSTEMIMAGE_TARGET): ext_modules WLAN_MODULES hboot
+
+# Opt-in stock-kernel hbootmod build; independent of KERNEL_OUT.
+include $(DEVICE_PATH)/modules/sources/hbootmod/stock.mk
