@@ -39,8 +39,18 @@ PRODUCT_COPY_FILES += \
 	$(DEVICE_PATH)/bootstrap/images/background-def.png:system/bootstrap/images/background-def.png
 
 # Bootstrap Modules
+# Set on the make command line (product configuration precedes BoardConfig).
+ifeq ($(HBOOTMOD_BUILD_FROM_SOURCE),true)
+ifeq ($(strip $(HBOOTMOD_OUT)),)
+$(error Source hbootmod packaging requires an absolute HBOOTMOD_OUT on the make command line)
+endif
 PRODUCT_COPY_FILES += \
-	$(DEVICE_PATH)/bootstrap/modules/hbootmod.ko:system/bootstrap/modules/hbootmod.ko \
+	$(HBOOTMOD_OUT)/hbootmod.ko:system/bootstrap/modules/hbootmod.ko
+else
+PRODUCT_COPY_FILES += \
+	$(DEVICE_PATH)/bootstrap/modules/hbootmod.ko:system/bootstrap/modules/hbootmod.ko
+endif
+PRODUCT_COPY_FILES += \
 	$(DEVICE_PATH)/bootstrap/modules/jbd2.ko:system/bootstrap/modules/jbd2.ko \
 	$(DEVICE_PATH)/bootstrap/modules/ext4.ko:system/bootstrap/modules/ext4.ko
 
