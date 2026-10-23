@@ -1,0 +1,82 @@
+Stock-kernel hbootuser startup diagnostic
+
+This probe is opt-in. It executes only /system/bootstrap/binary/hbootuser-test,
+with no arguments. Usage output and status 1 are expected. It does not exercise
+descriptor loading or kernel handoff. Keep both known-working production
+hbootuser and safestrapmenu installed; do not flash a ROM to deploy this probe.
+
+The hook runs after the cache mount on the stock-kernel path, before bootmode.conf
+or menu selection. Missing prerequisites leave boot selection running normally.
+The marker is removed and synced before execution. Logging is limited to 32 shell
+file-size blocks of candidate output (typically 16 KiB), plus small metadata.
+A noisy candidate may receive SIGXFSZ. The watchdog kills the candidate runner
+after 10 seconds, including its startup delay. It does not contain descendants
+or recover a hung kernel or an uninterruptible process. Another SBF recovery may
+still be necessary. Have a tested device recovery procedure ready.
+
+Prerequisites: a rooted device with adb root/remount support, host adb, a separate
+ARM candidate at ./hbootuser-test, and the repository as the current directory.
+If adb root/remount fails, stop and use the device's established root/remount
+procedure. None of these commands replaces either production binary.
+
+Back up EVERY installed script changed by this deployment before staging.
+Use a fresh backup directory; mkdir deliberately fails if it already exists:
+
+  adb root
+  adb remount
+  adb shell 'mkdir /system/bootstrap/diagnostic-backup && cp /system/bin/logwrapper /system/bootstrap/diagnostic-backup/logwrapper && if [ -e /system/bootstrap/script/hbootuser-diagnostic.sh ]; then cp /system/bootstrap/script/hbootuser-diagnostic.sh /system/bootstrap/diagnostic-backup/hbootuser-diagnostic.sh; else touch /system/bootstrap/diagnostic-backup/helper-was-absent; fi'
+  adb pull /system/bootstrap/diagnostic-backup ./hbootuser-diagnostic-backup
+
+Stop on any backup error. Keep the host backup for recovery when adb is unavailable.
+Stage the helper before logwrapper, with the marker absent:
+
+  adb shell 'rm -f /cache/recovery/hbootuser-diagnostic.once'
+  adb push bootstrap/script/hbootuser-diagnostic.sh /system/bootstrap/script/hbootuser-diagnostic.sh
+  adb push bootstrap/binary/logwrapper /system/bin/logwrapper
+  adb push ./hbootuser-test /system/bootstrap/binary/hbootuser-test
+  adb shell 'chmod 755 /system/bootstrap/script/hbootuser-diagnostic.sh /system/bin/logwrapper /system/bootstrap/binary/hbootuser-test; sync'
+
+Explicit opt-in for ONE boot (verify /cache is mounted first):
+
+  adb shell 'cat /proc/mounts'
+  adb shell 'mkdir -p /cache/recovery && touch /cache/recovery/hbootuser-diagnostic.once && sync'
+  adb reboot
+
+Retrieve the result after boot:
+
+  adb root
+  adb pull /cache/recovery/hbootuser-diagnostic.log ./hbootuser-diagnostic.log
+  adb shell 'ls -l /cache/recovery/hbootuser-diagnostic.once'
+
+The final ls should report no marker after execution. If prerequisites fail,
+the marker can remain: remove it to cancel any later attempt. Status 1 with usage
+text establishes startup only. A crash, signal, or watchdog expiration is not a
+successful startup. The log contains uname and /proc/cpu/alignment, never
+/proc/cmdline or serial properties. Candidate output itself is not sanitized;
+review it before sharing.
+
+Rollback (also disarms a pending test):
+
+  adb root
+  adb remount
+  adb shell 'rm -f /cache/recovery/hbootuser-diagnostic.once; cp /system/bootstrap/diagnostic-backup/logwrapper /system/bin/logwrapper && chmod 755 /system/bin/logwrapper'
+  adb shell 'if [ -f /system/bootstrap/diagnostic-backup/helper-was-absent ]; then rm -f /system/bootstrap/script/hbootuser-diagnostic.sh; else cp /system/bootstrap/diagnostic-backup/hbootuser-diagnostic.sh /system/bootstrap/script/hbootuser-diagnostic.sh && chmod 755 /system/bootstrap/script/hbootuser-diagnostic.sh; fi'
+  adb shell 'rm -f /system/bootstrap/binary/hbootuser-test; sync'
+
+Keep the backup until boot is verified. A stale diagnostic .work directory after
+a reset prevents another probe; only after the old probe has stopped, remove it
+with: adb shell 'rm -rf /cache/recovery/hbootuser-diagnostic.work'
+
+Validation boundary
+
+Run: python3 tests/hbootuser-diagnostic-test.py
+The host harness uses bash and host utilities with shortened watchdog timing.
+It checks disabled, missing candidate, unavailable cache, logging failure,
+startup, crash, timeout, subsequent boot, hook order, and unchanged boot selection.
+Source inspection confirms no production binary copy rule was added, no module
+load or descriptor is used by the helper, and no command line is collected.
+The bundled BusyBox is ARM v1.21.1-jb; the helper checks required applets, shell
+file-size limiting, kill, and sleep at runtime and skips if unsupported. No ARM
+execution or device verification was performed on the host. Verify disabled and
+opt-in boots, log bounds, watchdog timing, recovery shortcut, and menu on the
+actual stock-kernel device before relying on this diagnostic.

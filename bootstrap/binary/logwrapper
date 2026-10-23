@@ -19,6 +19,9 @@ $BB_STATIC mount -o remount,rw /
 $BB_STATIC mkdir /cache
 $BB_STATIC mount -t auto -o nosuid,nodev,noatime,nodiratime,barrier=1 /dev/block/mmcblk1p22 /cache
 
+# Optional one-shot startup probe; failures must not change boot selection.
+$BB_STATIC ash /system/bootstrap/script/hbootuser-diagnostic.sh
+
 # Set cpu to 1ghz
 echo 1000000 > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 
 echo performance > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor

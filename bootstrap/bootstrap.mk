@@ -16,6 +16,7 @@ PRODUCT_COPY_FILES += \
 # Bootstrap scripts
 PRODUCT_COPY_FILES += \
 	$(DEVICE_PATH)/bootstrap/script/2nd-boot.sh:system/bootstrap/script/2nd-boot.sh \
+	$(DEVICE_PATH)/bootstrap/script/hbootuser-diagnostic.sh:system/bootstrap/script/hbootuser-diagnostic.sh \
 	$(DEVICE_PATH)/bootstrap/script/pdsbackup.sh:system/bootstrap/script/pdsbackup.sh
 
 # Bootstrap 2nd-boot files
