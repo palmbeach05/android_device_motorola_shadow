@@ -13,8 +13,6 @@ $BB_STATIC mount -t ext3 /dev/block/mmcblk1p7 /pds 2>/dev/null
 
 $BB_STATIC mkdir -p $BOOT_DIR
 $BB_STATIC cp -f /system/bootstrap/2nd-boot/* $BOOT_DIR/
-$BB_STATIC mkdir -p $BOOT_DIR
-$BB_STATIC cp -f /system/bootstrap/2nd-boot/* $BOOT_DIR/
 $BB_STATIC cp -f /system/bootstrap/binary/hbootuser $BOOT_DIR/hbootuser
 $BB_STATIC cp -f /system/bootstrap/modules/hbootmod.ko $BOOT_DIR/hbootmod.ko
 $BB_STATIC chmod 755 $BOOT_DIR/*
