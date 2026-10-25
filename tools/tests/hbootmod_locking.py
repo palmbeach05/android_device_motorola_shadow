@@ -4,8 +4,9 @@
 Run: python3 tools/tests/hbootmod_locking.py
 Requires a Linux development host with a 32-bit C library/compiler (-m32) and
 pthreads, matching the source's 32-bit pointer storage. Uses actual buffer,
-CRC, ioctl, write and boot-preparation code; mocks allocation, user copies,
-UART/display and the irreversible transition. Does not validate kernel locking,
+CRC, ioctl, write, UART configuration and boot-preparation code; mocks allocation,
+user copies, MMIO, UART routing/display and the irreversible transition.
+Does not validate kernel locking,
 target compilation or hardware. Each executable has a timeout for deadlocks.
 """
 from pathlib import Path
@@ -34,6 +35,10 @@ start = buffers.index('/*\n * The device exposes')
 end = buffers.index('static void init_abstract_buffer', start)
 buffers = buffers[:start] + buffers[end:]
 hboot = (source / 'hboot.c').read_text()
+uart = '\n'.join(re.findall(r'^#define (?:MMU_\w+|UART_CLOCK_BASE_RATE)\s+\w+',
+                            hboot, re.MULTILINE)) + '\n'
+uart += function(hboot, 'static int emu_uart_divisor(int uart_speed, uint16_t *divisor)')
+uart += '\n' + function(hboot, 'void reconfigure_emu_uart(int uart_speed)')
 boot = function(hboot, 'static int hboot_boot(int handle) ')
 # No disabled-interrupt code or assembly is compiled into the harness.
 boot = boot[:boot.index('\t/* Disable preempting */')] + '''
@@ -53,6 +58,7 @@ boot = boot.replace('bootlist = get_bootlist(&listsize, handle);',
 preamble = r'''
 #include <assert.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -103,10 +109,30 @@ static size_t copy_from_user(void *to, const void *from, size_t size)
     if (copy_budget != (size_t)-1) copy_budget -= copied;
     return size - copied;
 }
-static int fail_pages, misalign_pages, fail_list, emu_uart = 1, kill_dss = 1;
+static int fail_pages, misalign_pages, fail_list, emu_uart = 115200, kill_dss = 1;
+static unsigned int allocations, routing, display, transitions;
+struct mmio_event { char operation; uint32_t address, value; };
+static struct mmio_event mmio[128];
+static unsigned int mmio_count;
+static void mmio_record(char operation, uint32_t address, uint32_t value)
+{
+    assert(mmio_count < sizeof(mmio) / sizeof(mmio[0]));
+    mmio[mmio_count++] = (struct mmio_event){ operation, address, value };
+}
+static uint32_t __raw_readl(uint32_t address)
+{
+    uint32_t value = address == 0xFB020058 ? 1 :
+                     address == 0xFB020044 ? 0 : 0x100;
+    mmio_record('r', address, value);
+    return value;
+}
+static void __raw_writel(uint32_t value, uint32_t address)
+{ mmio_record('w', address, value); }
+static void msleep(unsigned int duration) { mmio_record('s', 0, duration); }
 static uint32_t get_high_mem(size_t size)
 {
     void *p = calloc(1, size);
+    ++allocations;
     assert(p);
     return (uint32_t)p;
 }
@@ -114,6 +140,8 @@ static void free_high_mem(void *p) { free(p); }
 static uint32_t get_high_pages(unsigned int order)
 {
     void *p;
+    ++allocations;
+    mmio_count = 0;
     checkpoint(2);
     if (fail_pages) return 0;
     assert(!posix_memalign(&p, 16384, PAGE_SIZE << order));
@@ -122,9 +150,8 @@ static uint32_t get_high_pages(unsigned int order)
 }
 static void free_high_pages(void *p, unsigned int order) { (void)order; free((char *)p - (misalign_pages ? 4 : 0)); }
 static void build_l1_table(uint32_t *table) { (void)table; }
-static void activate_emu_uart(void) { checkpoint(5); }
-static void reconfigure_emu_uart(int speed) { (void)speed; }
-static void disable_dss(void) { checkpoint(6); }
+static void activate_emu_uart(void) { ++routing; checkpoint(5); }
+static void disable_dss(void) { ++display; checkpoint(6); }
 '''
 # Headers supply the real ABI and declarations; allocator mocks above are static.
 header = without_includes((source / 'buffers.h').read_text())
@@ -150,6 +177,7 @@ static int verify_reuse, reuse_boot_handle;
 static void *reuse_snapshot[MAX_BUFFERS_COUNT];
 static void mock_transition(void *list, uint32_t count, bootfunc_t entry)
 {
+    ++transitions;
     checkpoint(7);
     assert(entry && list);
 #ifdef HBOOT_VERIFY_CRC32
@@ -225,6 +253,96 @@ static void reset(void)
     memset(&buffers, 0, sizeof(buffers));
     assert(!buffers_init());
     first.f_pos = second.f_pos = 0;
+}
+/* Compare every read, write and wait to the existing UART programming sequence. */
+static void uart_programming(int rate, uint16_t divisor)
+{
+    struct mmio_event actual[128];
+    unsigned int count, i;
+    const char characters[] = "hbootmod!\r\n";
+    uint16_t checked = 0;
+    assert(!emu_uart_divisor(rate, &checked) && checked == divisor);
+    mmio_count = 0;
+    reconfigure_emu_uart(rate);
+    count = mmio_count;
+    memcpy(actual, mmio, sizeof(actual));
+    mmio_count = 0;
+    mmio_record('r', MMU_CM_FCLKEN_PER, 0x100);
+    mmio_record('w', MMU_CM_FCLKEN_PER, 0x900);
+    mmio_record('r', MMU_CM_ICLKEN_PER, 0x100);
+    mmio_record('w', MMU_CM_ICLKEN_PER, 0x900);
+    mmio_record('r', MMU_UART3_BASE + 0x54, 0x100);
+    mmio_record('w', MMU_UART3_BASE + 0x54, 0x102);
+    mmio_record('r', MMU_UART3_BASE + 0x58, 1);
+    mmio_record('r', MMU_UART3_BASE + 0x20, 0x100);
+    mmio_record('w', MMU_UART3_BASE + 0x20, 0x107);
+    mmio_record('r', MMU_UART3_BASE + 0x0C, 0x100);
+    mmio_record('w', MMU_UART3_BASE + 0x0C, 0xBF);
+    mmio_record('r', MMU_UART3_BASE + 0x08, 0x100);
+    mmio_record('w', MMU_UART3_BASE + 0x08, 0x110);
+    mmio_record('w', MMU_UART3_BASE + 0x0C, 0);
+    mmio_record('r', MMU_UART3_BASE + 0x04, 0x100);
+    mmio_record('w', MMU_UART3_BASE + 0x04, 0);
+    mmio_record('w', MMU_UART3_BASE + 0x0C, 0x80);
+    mmio_record('w', MMU_UART3_BASE + 0x08, 6);
+    mmio_record('w', MMU_UART3_BASE + 0x0C, 0xBF);
+    mmio_record('w', MMU_UART3_BASE + 0x00, divisor & 0xFF);
+    mmio_record('w', MMU_UART3_BASE + 0x04, divisor >> 8);
+    mmio_record('w', MMU_UART3_BASE + 0x0C, 0xBF);
+    mmio_record('w', MMU_UART3_BASE + 0x08, 0);
+    mmio_record('w', MMU_UART3_BASE + 0x0C, 3);
+    mmio_record('w', MMU_UART3_BASE + 0x20, 0);
+    mmio_record('s', 0, 1);
+    for (i = 0; i < sizeof(characters) - 1; ++i) {
+        mmio_record('w', MMU_UART3_BASE, characters[i]);
+        mmio_record('r', MMU_UART3_BASE + 0x44, 0);
+    }
+    assert(count == mmio_count);
+    for (i = 0; i < count; ++i) {
+        assert(actual[i].operation == mmio[i].operation);
+        assert(actual[i].address == mmio[i].address);
+        assert(actual[i].value == mmio[i].value);
+    }
+}
+static void uart_rates(void)
+{
+    /* Integer rates jump across the 14-bit limit between 182 and 183 baud;
+     * none yields exactly 0x3FFF with the existing clock constant. */
+    const int invalid[] = { -1, INT_MIN, 1, 181, 182, 2995201, INT_MAX };
+    const int valid[] = { 183, 184, 115200, 2995199, 2995200 };
+    const uint16_t divisors[] = { 16367, 16278, 26, 1, 1 };
+    unsigned int i;
+    reset();
+    assert(alloc(B_TYPE_PLAIN, 8, 0) == 0);
+    assert(alloc(B_TYPE_PLAIN, 8, 0) == 1);
+    for (i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+        struct abstract_buffer before = *buffers.bufs[1].container.abstract;
+        emu_uart = invalid[i];
+        allocations = routing = display = transitions = mmio_count = 0;
+        reconfigure_emu_uart(emu_uart);
+        assert(!mmio_count);
+        assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EINVAL);
+        assert(!allocations && !routing && !display && !transitions && !mmio_count);
+        assert(!memcmp(&before, buffers.bufs[1].container.abstract, sizeof(before)));
+        assert(!pthread_mutex_trylock(&hbootctrl_mutex));
+        pthread_mutex_unlock(&hbootctrl_mutex);
+    }
+    mmio_count = 0;
+    reconfigure_emu_uart(0);
+    assert(!mmio_count);
+    emu_uart = 0;
+    assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EBUSY);
+    assert(allocations == 1 && !routing && display == 1 && transitions == 1);
+    assert(!mmio_count);
+    for (i = 0; i < sizeof(valid) / sizeof(valid[0]); ++i) {
+        uart_programming(valid[i], divisors[i]);
+        emu_uart = valid[i];
+        allocations = routing = display = transitions = 0;
+        assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EBUSY);
+        assert(allocations == 1 && routing == 1 && display == 1 && transitions == 1);
+        assert(mmio_count);
+    }
+    emu_uart = 115200;
 }
 static void snapshot_payload(int handle, char *data, size_t size)
 {
@@ -582,6 +700,7 @@ int main(void)
     };
     assert(sizeof(void *) == 4);
     assert(!buffers_init());
+    uart_rates();
     selection(B_TYPE_PLAIN); selection(B_TYPE_SCATTERED);
     writes(B_TYPE_PLAIN); writes(B_TYPE_SCATTERED);
     for (i = 0; i < 2; ++i) {
@@ -656,7 +775,7 @@ with tempfile.TemporaryDirectory(prefix='hbootmod-locking-') as directory:
     executable = Path(directory) / 'locking'
     for verify in (True, False):
         configuration = '#define HBOOT_VERIFY_CRC32\n' if verify else ''
-        test_source.write_text(configuration + preamble + header + crc + buffers + '\n' + mutex +
+        test_source.write_text(configuration + preamble + uart + '\n' + header + crc + buffers + '\n' + mutex +
                                '\n' + mock + boot + '\n' + control + tests)
         subprocess.run([os.environ.get('CC', 'cc'), '-m32', '-std=gnu99', '-pthread',
                         '-Wall', '-Wextra', '-Wno-unused-parameter',
