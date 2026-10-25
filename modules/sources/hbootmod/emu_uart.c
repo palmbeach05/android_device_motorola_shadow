@@ -288,7 +288,7 @@ void activate_emu_uart(void)
 
 	cpcap_dev = cpcap->platform_data;
 	if (cpcap_dev == NULL)
-		return;
+		goto out_put_device;
 
 	spi = cpcap_dev->spi;
 
@@ -325,4 +325,7 @@ void activate_emu_uart(void)
 
 	printk(KERN_ALERT "WARNING: MiniUSB port works in UART3 mode, "
 	       "the USB functionality UNAVAILABLE!\n");
+
+out_put_device:
+	put_device(cpcap);
 }
