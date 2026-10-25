@@ -382,7 +382,7 @@ int allocate_buffer(uint8_t tag, uint8_t type, uint8_t attrs, uint32_t bufsize, 
 	void *data;
 	int handle;
 
-	switch (type) 
+	switch (type)
 	{
 		case B_TYPE_PLAIN:
 			data = allocate_plain_buffer(bufsize, rest);

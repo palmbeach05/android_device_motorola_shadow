@@ -54,10 +54,13 @@ void reconfigure_emu_uart(uint32_t uart_speed)
 	__raw_writel(__raw_readl(MMU_CM_FCLKEN_PER) | 0x0800, MMU_CM_FCLKEN_PER);
 	__raw_writel(__raw_readl(MMU_CM_ICLKEN_PER) | 0x0800, MMU_CM_ICLKEN_PER);
 
-	printk(KERN_INFO CTRL_DEVNAME ": Configuring UART3 on 0x%08X\n", MMU_UART3_BASE);
+	printk(KERN_INFO CTRL_DEVNAME ": Configuring UART3 on 0x%08X\n",
+	       MMU_UART3_BASE);
 
-	__raw_writel(__raw_readl(MMU_UART3_BASE + 0x54) | 0x02, MMU_UART3_BASE + 0x54);  //reset uart
-	while (!(__raw_readl(MMU_UART3_BASE + 0x58) & 1));
+	__raw_writel(__raw_readl(MMU_UART3_BASE + 0x54) | 0x02,
+		     MMU_UART3_BASE + 0x54); //reset uart
+	while (!(__raw_readl(MMU_UART3_BASE + 0x58) & 1))
+		;
 
 	mdr1 = __raw_readl(MMU_UART3_BASE + 0x20);
 	__raw_writel(mdr1 | 0x07, MMU_UART3_BASE + 0x20);
@@ -100,82 +103,108 @@ void reconfigure_emu_uart(uint32_t uart_speed)
 	__raw_writel(0x03, MMU_UART3_BASE + 0x0C);
 	__raw_writel(0x00, MMU_UART3_BASE + 0x20);
 
-	printk(KERN_INFO CTRL_DEVNAME ": UART3 configured for %u baudrate (div = 0x%04x).\n", uart_speed, div);
-	printk(KERN_INFO CTRL_DEVNAME ": UART3 registers: lcr[0x%4X], efr[0x%4X], mdr1[0x%4x], ier[0x%4X], dll[0x%4x], dlh[0x%4x]\n", lcr, efr, mdr1, ier, dll, dlh);
+	printk(KERN_INFO CTRL_DEVNAME ": UART3 configured for %u baudrate (div = 0x%04x).\n",
+	       uart_speed, div);
+	printk(KERN_INFO CTRL_DEVNAME ": UART3 registers: lcr[0x%4X], efr[0x%4X], mdr1[0x%4x], ier[0x%4X], dll[0x%4x], dlh[0x%4x]\n",
+	       lcr, efr, mdr1, ier, dll, dlh);
 
 	/* Wait for it to be ready */
 	msleep(1);
 
 	/* Test it */
-	__raw_writel('h', MMU_UART3_BASE + 0x00); while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0);
-	__raw_writel('b', MMU_UART3_BASE + 0x00); while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0);
-	__raw_writel('o', MMU_UART3_BASE + 0x00); while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0);
-	__raw_writel('o', MMU_UART3_BASE + 0x00); while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0);
-	__raw_writel('t', MMU_UART3_BASE + 0x00); while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0);
-	__raw_writel('m', MMU_UART3_BASE + 0x00); while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0);
-	__raw_writel('o', MMU_UART3_BASE + 0x00); while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0);
-	__raw_writel('d', MMU_UART3_BASE + 0x00); while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0);
-	__raw_writel('!', MMU_UART3_BASE + 0x00); while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0);
-	__raw_writel('\r', MMU_UART3_BASE + 0x00); while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0);
-	__raw_writel('\n', MMU_UART3_BASE + 0x00); while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0);
+	__raw_writel('h', MMU_UART3_BASE + 0x00);
+	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
+		;
+	__raw_writel('b', MMU_UART3_BASE + 0x00);
+	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
+		;
+	__raw_writel('o', MMU_UART3_BASE + 0x00);
+	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
+		;
+	__raw_writel('o', MMU_UART3_BASE + 0x00);
+	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
+		;
+	__raw_writel('t', MMU_UART3_BASE + 0x00);
+	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
+		;
+	__raw_writel('m', MMU_UART3_BASE + 0x00);
+	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
+		;
+	__raw_writel('o', MMU_UART3_BASE + 0x00);
+	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
+		;
+	__raw_writel('d', MMU_UART3_BASE + 0x00);
+	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
+		;
+	__raw_writel('!', MMU_UART3_BASE + 0x00);
+	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
+		;
+	__raw_writel('\r', MMU_UART3_BASE + 0x00);
+	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
+		;
+	__raw_writel('\n', MMU_UART3_BASE + 0x00);
+	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
+		;
 }
 
-int __attribute__((__naked__)) do_branch(void *bootlist, uint32_t bootsize, uint32_t new_ttbl, void *func, 
-																				 uint32_t p_emu_uart, uint32_t p_powerup_reason, uint16_t p_battery_status_at_boot,
-																				 uint8_t p_cid_recover_boot) 
+int __attribute__((__naked__)) do_branch(void *bootlist, uint32_t bootsize,
+				       uint32_t new_ttbl, void *func,
+				       uint32_t p_emu_uart,
+				       uint32_t p_powerup_reason,
+				       uint16_t p_battery_status_at_boot,
+				       uint8_t p_cid_recover_boot)
 {
-	__asm__ volatile 
-	(
+	__asm__ volatile (
 		"sub    sp, sp, #0x10\n"
 		"stmfd  sp!, {r0-r3}\n"
 	);
-		
+
 	/* Reset SDMA */
 	__raw_writel(__raw_readl(MMU_SDMA_BASE + 0x2C) | 2, MMU_SDMA_BASE + 0x2C);
-	while (__raw_readl(MMU_SDMA_BASE + 0x28) != 1);
+	while (__raw_readl(MMU_SDMA_BASE + 0x28) != 1)
+		;
 
 	local_flush_tlb_all();
 	v7_flush_kern_cache_all();
 
 	/* Disable any caches */
-	__asm__ volatile 
-	(
+	__asm__ volatile (
 		"mov    r0, #0x00\n"
-		
+
 		/* Invalidate Cache */
 		"mcr    p15, 0, r0, c7, c5, 0\n"
 		"mcr    p15, 0, r0, c7, c5, 4\n"
 		"mcr    p15, 0, r0, c7, c5, 6\n"
-		
+
 		/* Invalidate TLBs */
 		"mcr    p15, 0, r0, c8, c7, 0\n"
 		"mcr    p15, 0, r0, c8, c6, 0\n"
 		"mcr    p15, 0, r0, c8, c5, 0\n"
-		
+
 		/* Barriers */
 		"mcr     p15, 0, r0, c7, c10, 4\n"
 		"mcr     p15, 0, r0, c7, c5, 4\n"
-		
+
 		/* Control Register */
 		"mrc    p15, 0, r0, c1, c0, 0\n"
-		
+
 		/* Disable Branch Prediction & Instruction Cache */
 		"bic    r0, r0, #0x1800\n" //-i -z
-		
+
 		/* Disable cache requests for everything (Instruction, Data, L2) */
 		"bic    r0, r0, #0x0006\n" //-c -a
 		"mcr    p15, 0, r0, c1, c0, 0\n"
-		
+
 		/* Auxiliary Control Register */
 		"mrc    p15, 0, r0, c1, c0, 1\n"
-		
+
 		/* Disable L1 & L2 cache */
 		"bic    r0, #0x02\n"
 		"mcr    p15, 0, r0, c1, c0, 1\n"
-		
+
 		"ldmfd  sp!, {r0-r3}\n"
 		"add    sp, sp, #0x10\n"
-		
+
 		/* OK - Ready to branch */
 		"bx     r3\n"
 	);
@@ -183,7 +212,8 @@ int __attribute__((__naked__)) do_branch(void *bootlist, uint32_t bootsize, uint
 	return 0;
 }
 
-static void l1_map(uint32_t *table, uint32_t phys, uint32_t virt, size_t sects, uint32_t flags) 
+static void l1_map(uint32_t *table, uint32_t phys, uint32_t virt,
+		   size_t sects, uint32_t flags)
 {
 	uint32_t physbase, virtbase;
 
@@ -195,11 +225,11 @@ static void l1_map(uint32_t *table, uint32_t phys, uint32_t virt, size_t sects, 
 
 #define L1_NORMAL_MAPPING (PMD_TYPE_SECT | PMD_SECT_AP_WRITE | PMD_SECT_WB)
 #define L1_DEVICE_MAPPING (PMD_TYPE_SECT | PMD_SECT_AP_WRITE | PMD_SECT_UNCACHED)
-void build_l1_table(uint32_t *table) 
+void build_l1_table(uint32_t *table)
 {
-	memset(table, 0, 4*4096);
-	l1_map(table, PHYS_OFFSET, PHYS_OFFSET, 512-12, L1_NORMAL_MAPPING);
-	l1_map(table, PHYS_OFFSET, PAGE_OFFSET, 512-12, L1_NORMAL_MAPPING);
+	memset(table, 0, 4 * 4096);
+	l1_map(table, PHYS_OFFSET, PHYS_OFFSET, 512 - 12, L1_NORMAL_MAPPING);
+	l1_map(table, PHYS_OFFSET, PAGE_OFFSET, 512 - 12, L1_NORMAL_MAPPING);
 	l1_map(table, 0x48000000, MMU_48000000, 1, L1_NORMAL_MAPPING);
 	l1_map(table, 0x49000000, MMU_49000000, 1, L1_NORMAL_MAPPING);
 }
@@ -214,36 +244,33 @@ static int find_my_dev(struct device *dev, void *data);
 
 static void disable_dss(void)
 {
-    struct device *dev;
-    struct platform_device *plat_dev;
-    struct device_driver *drv; 
-    struct platform_driver *plat_drv; 
-    pm_message_t pt;
+	struct device *dev;
+	struct platform_device *plat_dev;
+	struct device_driver *drv;
+	struct platform_driver *plat_drv;
+	pm_message_t pt;
 
-    dev = device_find_child(&platform_bus, "omapdss", find_my_dev);
-    if (!dev)
-    {
-        printk("Could not find omapdss device\n");
-        return;
-    }
-    drv = dev->driver;
-    if (!drv)
-    {
-        printk("Could not find omapdss driver\n");
-        return;
-    }
-    plat_drv = to_platform_driver(drv);
+	dev = device_find_child(&platform_bus, "omapdss", find_my_dev);
+	if (!dev) {
+		printk("Could not find omapdss device\n");
+		return;
+	}
+	drv = dev->driver;
+	if (!drv) {
+		printk("Could not find omapdss driver\n");
+		return;
+	}
+	plat_drv = to_platform_driver(drv);
 
-    plat_dev = to_platform_device(dev);
+	plat_dev = to_platform_device(dev);
 
-    if (!plat_drv->suspend)
-    {
-        printk("Could not find suspend in omapdss driver\n");
-        return;
-    }
-    pt.event = 0;
-    plat_drv->suspend(plat_dev, pt);
-}  
+	if (!plat_drv->suspend) {
+		printk("Could not find suspend in omapdss driver\n");
+		return;
+	}
+	pt.event = 0;
+	plat_drv->suspend(plat_dev, pt);
+}
 
 /* Caller holds hbootctrl_mutex through preparation and the transition. */
 static int hboot_boot(int handle)
@@ -252,43 +279,37 @@ static int hboot_boot(int handle)
 	uint32_t bootsize, listsize;
 	void *bootlist;
 	uint32_t l1_mem, *l1_table;
-    
+
 	l1_mem = get_high_pages(2);
-	if (l1_mem == 0) 
-	{
+	if (l1_mem == 0) {
 		printk(KERN_INFO CTRL_DEVNAME ": Failed to allocate new l1 table\n");
 		return -ENOMEM;
 	}
 
-	if (l1_mem & 0x3FFF) 
-	{
-		free_high_pages((void*)l1_mem, 2);
+	if (l1_mem & 0x3FFF) {
+		free_high_pages((void *)l1_mem, 2);
 		return -EINVAL;
-	} 
-	else
-		l1_table = (uint32_t*)l1_mem;
-	
+	} else
+		l1_table = (uint32_t *)l1_mem;
+
 	build_l1_table(l1_table);
 
 	boot_entry = get_bootentry(&bootsize, handle);
-	if (boot_entry == NULL)
-	{
+	if (boot_entry == NULL) {
 		printk(KERN_ERR CTRL_DEVNAME ": Failed to get boot entry\n");
-		free_high_pages((void*)l1_mem, 2);
+		free_high_pages((void *)l1_mem, 2);
 		return -EINVAL;
 	}
 
 	bootlist = get_bootlist(&listsize, handle);
-	if (bootlist == NULL)
-	{
+	if (bootlist == NULL) {
 		printk(KERN_ERR CTRL_DEVNAME ": Failed to get bootlist\n");
-		free_high_pages((void*)l1_mem, 2);
+		free_high_pages((void *)l1_mem, 2);
 		return -ENOMEM;
 	}
 
 	/* UART - if desired */
-	if (emu_uart)
-	{
+	if (emu_uart) {
 		activate_emu_uart();
 		reconfigure_emu_uart(emu_uart);
 	}
@@ -302,38 +323,41 @@ static int hboot_boot(int handle)
 	local_irq_disable();
 	local_fiq_disable();
 
-	do_branch(bootlist, listsize, virt_to_phys(l1_table), boot_entry, emu_uart, bi_powerup_reason(),
-						bi_battery_status_at_boot(), bi_cid_recover_boot());
+	do_branch(bootlist, listsize, virt_to_phys(l1_table), boot_entry,
+		  emu_uart, bi_powerup_reason(), bi_battery_status_at_boot(),
+		  bi_cid_recover_boot());
 	return -EBUSY;
 }
 
 static int hbootctrl_open(struct inode *inode, struct file *file);
 static int hbootctrl_release(struct inode *inode, struct file *file);
-static int hbootctrl_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg);
-static int hbootctrl_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos);
+static int hbootctrl_ioctl(struct inode *inode, struct file *file,
+			   unsigned int cmd, unsigned long arg);
+static int hbootctrl_write(struct file *file, const char __user *buf,
+			   size_t count, loff_t *ppos);
 
-static struct file_operations hbootctrl_ops = 
-{
+static struct file_operations hbootctrl_ops = {
 	.owner		= THIS_MODULE,
-	.open			= hbootctrl_open,
+	.open		= hbootctrl_open,
 	.release	= hbootctrl_release,
 	.ioctl		= hbootctrl_ioctl,
 	.write		= hbootctrl_write,
 };
 
-static int hbootctrl_open(struct inode *inode, struct file *file) 
+static int hbootctrl_open(struct inode *inode, struct file *file)
 {
 	printk(KERN_INFO CTRL_DEVNAME ": `open' stub called\n");
 	return 0;
 }
 
-static int hbootctrl_release(struct inode *inode, struct file *file) 
+static int hbootctrl_release(struct inode *inode, struct file *file)
 {
 	printk(KERN_INFO CTRL_DEVNAME ": `release' stub called\n");
 	return 0;
 }
 
-static int hbootctrl_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg) 
+static int hbootctrl_ioctl(struct inode *inode, struct file *file,
+			   unsigned int cmd, unsigned long arg)
 {
 	int ret;
 	int handle;
@@ -341,45 +365,46 @@ static int hbootctrl_ioctl(struct inode *inode, struct file *file, unsigned int 
 
 	mutex_lock(&hbootctrl_mutex);
 	ret = 0;
-	switch (cmd) 
-	{
-		case HBOOT_ALLOCATE_BUFFER:
-			if (copy_from_user((void*)&buf_req, (void*)arg, sizeof(struct hboot_buffer_req)) != 0)
-			{
-				ret = -EINVAL;
-				break;
-			}
-
-			ret = allocate_buffer(buf_req.tag, buf_req.type, buf_req.attrs, buf_req.size, buf_req.rest);
-			break;
-			
-		case HBOOT_FREE_BUFFER:
-			handle = (int)arg;
-			ret = free_buffer(handle);
-			break;
-			
-		case HBOOT_SELECT_BUFFER:
-			handle = (int)arg;
-			ret = select_buffer(handle);
-			if (ret >= 0)
-				file->f_pos = 0;
-			
-			break;
-			
-		case HBOOT_BOOT:
-			handle = (int)arg;
-			ret = hboot_boot(handle);
-			break;
-			
-		default:
+	switch (cmd) {
+	case HBOOT_ALLOCATE_BUFFER:
+		if (copy_from_user((void *)&buf_req, (void *)arg,
+			   sizeof(struct hboot_buffer_req)) != 0) {
 			ret = -EINVAL;
 			break;
+		}
+
+		ret = allocate_buffer(buf_req.tag, buf_req.type, buf_req.attrs,
+			      buf_req.size, buf_req.rest);
+		break;
+
+	case HBOOT_FREE_BUFFER:
+		handle = (int)arg;
+		ret = free_buffer(handle);
+		break;
+
+	case HBOOT_SELECT_BUFFER:
+		handle = (int)arg;
+		ret = select_buffer(handle);
+		if (ret >= 0)
+			file->f_pos = 0;
+
+		break;
+
+	case HBOOT_BOOT:
+		handle = (int)arg;
+		ret = hboot_boot(handle);
+		break;
+
+	default:
+		ret = -EINVAL;
+		break;
 	}
 	mutex_unlock(&hbootctrl_mutex);
 	return ret;
 }
 
-static int hbootctrl_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
+static int hbootctrl_write(struct file *file, const char __user *buf,
+			   size_t count, loff_t *ppos)
 {
 	int ret;
 
@@ -387,36 +412,35 @@ static int hbootctrl_write(struct file *file, const char __user *buf, size_t cou
 	ret = buffer_append_userdata(buf, count, ppos);
 	mutex_unlock(&hbootctrl_mutex);
 	return ret;
-}  
+}
 
-static int find_my_dev(struct device *dev, void *data)                                                                                                                          
-{                                                                                                                                                                                
-    const char *drv_name = "UNKNOWN";
-    if (dev->driver && dev->driver->name)
-        drv_name = dev->driver->name;
+static int find_my_dev(struct device *dev, void *data)
+{
+	const char *drv_name = "UNKNOWN";
 
-    printk("dev[%s], driver[%s]\n", dev_name(dev), drv_name);
-    if (!strncmp((char*)data, dev_name(dev), strlen((char*)data))) {                                                                                                             
-        printk(KERN_INFO "Found it\n");                                                                                                                                          
-        return 1;                                                                                                                                                                
-    }                                                                                                                                                                            
-    return 0;                                                                                                                                                                    
-}    
+	if (dev->driver && dev->driver->name)
+		drv_name = dev->driver->name;
 
-int __init hbootmod_init(void) 
+	printk("dev[%s], driver[%s]\n", dev_name(dev), drv_name);
+	if (!strncmp((char *)data, dev_name(dev), strlen((char *)data))) {
+		printk(KERN_INFO "Found it\n");
+		return 1;
+	}
+	return 0;
+}
+
+int __init hbootmod_init(void)
 {
 	int ret;
 
 	ret = buffers_init();
-	if (ret < 0) 
-	{
+	if (ret < 0) {
 		printk(KERN_ERR CTRL_DEVNAME ": Failed to initialize buffers table\n");
 		return ret;
 	}
 
 	ret = register_chrdev(0, CTRL_DEVNAME, &hbootctrl_ops);
-	if (ret < 0) 
-	{
+	if (ret < 0) {
 		printk(KERN_ERR CTRL_DEVNAME ": Failed to register dev\n");
 		buffers_destroy();
 		return ret;

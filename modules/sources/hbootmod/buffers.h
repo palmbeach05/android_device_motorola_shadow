@@ -6,7 +6,7 @@
 #include <linux/types.h>
 
 #pragma pack(push, 1)
-struct abstract_buffer 
+struct abstract_buffer
 {
   uint8_t tag;
   uint8_t state;
