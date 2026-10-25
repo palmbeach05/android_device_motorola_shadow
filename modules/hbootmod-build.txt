@@ -1,4 +1,4 @@
-Stock-kernel hbootmod baseline
+hbootmod build baseline
 
 The authoritative source and Kbuild object list are in sources/hbootmod/.
 Android build rules are in sources/hbootmod/hbootmod.mk, separate from the
@@ -10,13 +10,16 @@ and ext_modules excludes sources/hbootmod/ from its recursive module collection.
 
 Required inputs
 
-Supply a prepared ARM kernel build tree matching the stock 2.6.32.9 kernel that
-loads hbootmod, including Motorola's platform headers, the exact stock config,
-generated headers, kernel release, and build Makefile. For an out-of-tree kernel
-build, supply the prepared output tree with its source links intact. Do not use
-the custom kernel's KERNEL_OUT. With CONFIG_MODVERSIONS=y, Module.symvers from
-the matching full kernel build is required; modules_prepare alone is insufficient.
-An arbitrary tree reporting 2.6.32.9 does not establish ABI compatibility.
+Set HBOOTMOD_KERNEL_BUILD to the ARM kernel build tree to use. The caller may
+select KERNEL_OUT. For an out-of-tree kernel build, supply the output tree with
+its source links intact. The wrapper checks only that HBOOTMOD_KERNEL_BUILD is
+nonempty; Kbuild handles kernel-tree preparation, generated headers, config,
+and Module.symvers requirements and reports build-input errors.
+
+Successful compilation does not establish runtime compatibility. Loading on the
+stock 2.6.32.9 kernel still requires compatible platform headers, configuration,
+exports and symbol versions. An arbitrary tree reporting 2.6.32.9 does not
+establish ABI compatibility.
 
 Use the existing Android GCC 4.4.3 toolchain by default, or explicitly set
 HBOOTMOD_CROSS_COMPILE to an appropriate absolute compiler prefix. No compiler
@@ -24,8 +27,8 @@ version is rejected solely by its version string.
 
 Build and package (from the configured Android build root after lunch)
 
-  make HBOOTMOD_FROM_SOURCE=true HBOOTMOD_KERNEL_BUILD=/absolute/stock-build hbootmod
-  make HBOOTMOD_FROM_SOURCE=true HBOOTMOD_KERNEL_BUILD=/absolute/stock-build systemimage
+  make HBOOTMOD_FROM_SOURCE=true HBOOTMOD_KERNEL_BUILD=/absolute/kernel-build hbootmod
+  make HBOOTMOD_FROM_SOURCE=true HBOOTMOD_KERNEL_BUILD=/absolute/kernel-build systemimage
 
 Keep both variables on every source-build invocation. The generated module is
 out/target/product/shadow/obj/HBOOTMOD/hbootmod.ko (adjust for PRODUCT_OUT).
@@ -56,10 +59,10 @@ Compare the generated module with system/bootstrap/modules/hbootmod.ko using
 cmp, and check the extracted system image and target-files archive contain that
 same generated file. Make a temporary source change, rebuild systemimage with
 the same variables, verify recompilation and reinstallation, then restore it and
-rebuild. Select an invalid stock tree and separately force a compiler failure;
-both builds must fail without producing a successful system image or copying the
-prebuilt. An old installed file can remain after a failed build; never deploy it
-as the result of that build. Run git diff --check.
+rebuild. Leave HBOOTMOD_KERNEL_BUILD empty, select a nonexistent kernel build
+path, and separately force a compiler failure; each build must fail without
+producing a successful system image or copying the prebuilt. An old installed
+file can remain after a failed build; never deploy it as the result of that build. Run git diff --check.
 
 Hardware gate and rollback
 
@@ -85,9 +88,9 @@ Build integration does not establish module compatibility. Actual compilation,
 linking, generated ELF/CRC checks, image packaging, rebuild/reinstall and hardware
 checks require those inputs and remain mandatory before merge.
 
-Local checks passed for Makefile parsing in both modes, exactly one selected
-packaging input per mode, standalone preflight rejection of missing/unprepared
-kernel inputs and missing required Module.symvers, and the recursive collection
-exclusion. These are rule checks, not a source build. The local GNU Make could
-not launch recipe shells (Operation not permitted), so end-to-end build failure
-propagation was not validated here. Diff whitespace was checked separately.
+Local rule checks do not establish successful compilation or runtime
+compatibility. Check the nonempty HBOOTMOD_KERNEL_BUILD guard, delegation of
+kernel input validation to Kbuild (including when selecting KERNEL_OUT), and
+propagation of Kbuild failures and missing output files. Also check Makefile
+parsing in both modes, source/prebuilt selection, isolated staging, and the
+recursive collection exclusion.

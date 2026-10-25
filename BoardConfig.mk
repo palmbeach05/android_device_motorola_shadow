@@ -195,7 +195,7 @@ KERNEL_TOOLCHAIN							:= $(ANDROID_BUILD_TOP)/prebuilt/linux-x86/toolchain/$(TA
 KERNEL_CROSS_COMPILE 						:= $(KERNEL_TOOLCHAIN)/arm-eabi-
 KERNEL_MAKE_FLAGS							+= ARCH=arm CROSS_COMPILE=$(KERNEL_CROSS_COMPILE) CC=$(KERNEL_CROSS_COMPILE)gcc
 
-# Stock-kernel bootstrap module; never build against the custom KERNEL_OUT.
+# Bootstrap module; optional source builds use HBOOTMOD_KERNEL_BUILD.
 include $(DEVICE_PATH)/modules/sources/hbootmod/hbootmod.mk
 
 # --- Custom Module Build Logic ---
