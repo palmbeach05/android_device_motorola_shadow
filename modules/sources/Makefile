@@ -7,9 +7,7 @@ obj-m += symsearch/
 obj-m += backlight/
 obj-m += overclock/
 
-ifeq ($(HBOOTMOD_FROM_SOURCE),true)
 obj-m += hbootmod/
-endif
 
 #obj-m += multitouch/
 #obj-m += mmcfix/
@@ -56,10 +54,10 @@ all: modules
 modules:
 	pwd
 	@echo $@ EXTRA_CFLAGS = $(EXTRA_CFLAGS)
-	$(MAKE) CROSS_COMPILE=$(CROSS_COMPILE) EXTRA_CFLAGS="$(EXTRA_CFLAGS)" ARCH=$(ARCH) -C $(KERNEL_DIR) M=$(PWD) HBOOTMOD_FROM_SOURCE=$(HBOOTMOD_FROM_SOURCE) modules
-	@find $(PWD) -path "$(PWD)/hbootmod" -prune -o -print | grep "\\.o$$" | xargs rm -f
-	@find $(PWD) -path "$(PWD)/hbootmod" -prune -o -print | grep "\\.cmd$$" | xargs rm -f
-	@find $(PWD) -path "$(PWD)/hbootmod" -prune -o -print | grep "\\.mod.c$$" | xargs rm -f
-	@find $(PWD) -path "$(PWD)/hbootmod" -prune -o -print | grep "\\.order$$" | xargs rm -f
-	@find $(PWD) -path "$(PWD)/hbootmod" -prune -o -print | grep "\\.tmp_versions$$" | xargs rm -rf
+	$(MAKE) CROSS_COMPILE=$(CROSS_COMPILE) EXTRA_CFLAGS="$(EXTRA_CFLAGS)" ARCH=$(ARCH) -C $(KERNEL_DIR) M=$(PWD) modules
+	@find $(PWD) | grep "\\.o$$" | xargs rm -f
+	@find $(PWD) | grep "\\.cmd$$" | xargs rm -f
+	@find $(PWD) | grep "\\.mod.c$$" | xargs rm -f
+	@find $(PWD) | grep "\\.order$$" | xargs rm -f
+	@find $(PWD) | grep "\\.tmp_versions$$" | xargs rm -rf
 

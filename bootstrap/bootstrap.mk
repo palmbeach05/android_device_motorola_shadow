@@ -43,14 +43,8 @@ PRODUCT_COPY_FILES += \
 	$(DEVICE_PATH)/bootstrap/modules/jbd2.ko:system/bootstrap/modules/jbd2.ko \
 	$(DEVICE_PATH)/bootstrap/modules/ext4.ko:system/bootstrap/modules/ext4.ko
 
-# Select explicitly; retain the known-good prebuilt until hardware validation.
-ifeq ($(HBOOTMOD_FROM_SOURCE),true)
-PRODUCT_COPY_FILES += \
-	$(OUT)/obj/HBOOTMOD/hbootmod.ko:system/bootstrap/modules/hbootmod.ko
-else
 PRODUCT_COPY_FILES += \
 	$(DEVICE_PATH)/bootstrap/modules/hbootmod.ko:system/bootstrap/modules/hbootmod.ko
-endif
 
 # Generated Files
 PRODUCT_COPY_FILES += \
