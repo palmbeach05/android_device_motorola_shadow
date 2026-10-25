@@ -51,10 +51,6 @@ struct generic_buffer
 
 		void *generic;
 	} container;
-#ifdef HBOOT_VERIFY_CRC32
-	/* Running byte-stream CRC; packed metadata holds the published checksum. */
-	uint32_t crc_context;
-#endif
 };
 
 struct buffers_ctx
@@ -293,10 +289,6 @@ static int append_scattered_buffer(struct generic_buffer *buf, const char __user
 		uncopied = copy_from_user((char*)sc->chunks[chunk] + chunk_off,
 		                          data + written, cur_size);
 		copied = cur_size - uncopied;
-#ifdef HBOOT_VERIFY_CRC32
-		if (copied && (BUFFER_ATTRS(sc) & B_ATTR_VERIFY))
-			crc32_update(&buf->crc_context, (const uint8_t*)sc->chunks[chunk] + chunk_off, copied);
-#endif
 		written += copied;
 		if (uncopied)
 			return written ? (int)written : -EFAULT;
@@ -346,10 +338,6 @@ static int append_plain_buffer(struct generic_buffer *buf, const char __user *da
 
 	uncopied = copy_from_user((char*)pb->data + pos, data, size);
 	copied = size - uncopied;
-#ifdef HBOOT_VERIFY_CRC32
-	if (copied && (BUFFER_ATTRS(pb) & B_ATTR_VERIFY))
-		crc32_update(&buf->crc_context, (const uint8_t*)pb->data + pos, copied);
-#endif
 	if (uncopied && !copied)
 		return -EFAULT;
 	return (int)copied;
@@ -421,9 +409,6 @@ int allocate_buffer(uint8_t tag, uint8_t type, uint8_t attrs, uint32_t bufsize, 
 	}
 
 	init_abstract_buffer(ABSTRACT(data), tag, type, attrs, bufsize);
-#ifdef HBOOT_VERIFY_CRC32
-	crc32_init_ctx(&buf->crc_context);
-#endif
 	buf->container.generic = data;
 	return handle;
 }
@@ -525,7 +510,35 @@ void *get_bootlist(uint32_t *listsize, int handle)
 #ifdef HBOOT_VERIFY_CRC32
 			if (BUFFER_ATTRS(buf->container.abstract) & B_ATTR_VERIFY)
 			{
-				uint32_t checksum = buf->crc_context;
+				uint32_t checksum;
+
+				/* Hash current logical contents under the operation mutex. */
+				crc32_init_ctx(&checksum);
+				switch (BUFFER_TYPE(buf->container.abstract))
+				{
+					case B_TYPE_PLAIN:
+						crc32_update(&checksum, buf->container.plain->data,
+						             BUFFER_SIZE(buf->container.plain));
+						break;
+					case B_TYPE_SCATTERED:
+					{
+						struct scattered_buffer *sc = buf->container.scattered;
+						size_t remaining = BUFFER_SIZE(sc);
+						uint32_t chunk = 0;
+
+						while (remaining)
+						{
+							size_t size = min(remaining, (size_t)sc->chunk_size);
+
+							crc32_update(&checksum, (const uint8_t*)sc->chunks[chunk++], size);
+							remaining -= size;
+						}
+						break;
+					}
+					case B_TYPE_NAND:
+						/* Preserve the existing empty-stream checksum; no NAND read. */
+						break;
+				}
 
 				crc32_final(&checksum);
 				BUFFER_CHECKSUM(buf->container.abstract) = checksum;
