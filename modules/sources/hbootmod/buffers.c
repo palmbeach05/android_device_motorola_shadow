@@ -432,6 +432,8 @@ int free_buffer(int handle)
 	data = buf->container.generic;
 	type = BUFFER_TYPE(buf->container.abstract);
 	buf->container.generic = NULL;
+	if (buffers.handle == handle)
+		buffers.handle = INVALID_BUFFER_HANDLE;
 
 	free_typed_buffer(data, type);
 	return 0;
@@ -439,6 +441,9 @@ int free_buffer(int handle)
 
 int select_buffer(int handle) 
 {
+	if (get_buffer(handle) == NULL)
+		return -EINVAL;
+
 	buffers.handle = handle;
 	return 0;
 }
@@ -525,6 +530,7 @@ void *get_bootlist(uint32_t *listsize, int handle)
 
 int buffers_init(void) 
 {
+	buffers.handle = INVALID_BUFFER_HANDLE;
 	buffers.bootlist = (void*)get_high_mem(MAX_BUFFERS_COUNT*sizeof(void*));
 	if (buffers.bootlist == NULL)
 		return -1;

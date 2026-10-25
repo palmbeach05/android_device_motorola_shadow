@@ -183,6 +183,106 @@ static void reset(void)
     assert(!buffers_init());
     first.f_pos = second.f_pos = 0;
 }
+static void snapshot_payload(int handle, char *data, size_t size)
+{
+    struct generic_buffer *buf = &buffers.bufs[handle];
+    size_t offset;
+    if (BUFFER_TYPE(buf->container.abstract) == B_TYPE_PLAIN) {
+        memcpy(data, buf->container.plain->data, size);
+    } else {
+        struct scattered_buffer *sc = buf->container.scattered;
+        for (offset = 0; offset < size; offset += sc->chunk_size)
+            memcpy(data + offset, (void *)sc->chunks[offset / sc->chunk_size],
+                   min(size - offset, (size_t)sc->chunk_size));
+    }
+}
+/* Rejected writes must leave payload, CRC/state and both file positions intact. */
+static void rejected_writes(int handle)
+{
+    char before[9000], after[9000];
+    struct abstract_buffer metadata = *buffers.bufs[handle].container.abstract;
+    loff_t first_pos = first.f_pos, second_pos = second.f_pos;
+    snapshot_payload(handle, before, sizeof(before));
+    assert(hbootctrl_write(&first, "abcdefgh", 8, &first.f_pos) == -EINVAL);
+    assert(hbootctrl_write(&second, "abcdefgh", 8, &second.f_pos) == -EINVAL);
+    snapshot_payload(handle, after, sizeof(after));
+    assert(!memcmp(before, after, sizeof(before)));
+    assert(!memcmp(&metadata, buffers.bufs[handle].container.abstract, sizeof(metadata)));
+    assert(first.f_pos == first_pos && second.f_pos == second_pos);
+}
+static void selection(int type)
+{
+    char payload[9000], actual[9000];
+    int h, unrelated, i;
+    int invalid[3];
+    reset();
+    first.f_pos = 3; second.f_pos = 5;
+    assert(buffers.handle == INVALID_BUFFER_HANDLE);
+    assert(hbootctrl_write(&first, "abcdefgh", 8, &first.f_pos) == -EINVAL);
+    assert(first.f_pos == 3 && second.f_pos == 5);
+    h = alloc(type, sizeof(payload), B_ATTR_VERIFY);
+    assert(h == 0 && buffers.handle == INVALID_BUFFER_HANDLE);
+    rejected_writes(h);
+    invalid[0] = -1; invalid[1] = buffers.used; invalid[2] = MAX_BUFFERS_COUNT;
+    for (i = 0; i < 3; ++i) {
+        assert(ioctl_op(&first, HBOOT_SELECT_BUFFER, invalid[i]) == -EINVAL);
+        assert(buffers.handle == INVALID_BUFFER_HANDLE);
+        assert(first.f_pos == 3 && second.f_pos == 5);
+    }
+    assert(!ioctl_op(&second, HBOOT_SELECT_BUFFER, h));
+    assert(first.f_pos == 3 && second.f_pos == 0);
+    assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, h));
+    assert(first.f_pos == 0 && second.f_pos == 0);
+    memset(payload, 's', sizeof(payload));
+    assert(hbootctrl_write(&first, payload, sizeof(payload), &first.f_pos) == sizeof(payload));
+    second.f_pos = 7;
+    for (i = 0; i < 3; ++i) {
+        assert(ioctl_op(&second, HBOOT_SELECT_BUFFER, invalid[i]) == -EINVAL);
+        assert(buffers.handle == h);
+        assert(first.f_pos == sizeof(payload) && second.f_pos == 7);
+    }
+    unrelated = alloc(B_TYPE_PLAIN, 8, 0);
+    assert(unrelated == 1 && buffers.handle == h);
+    assert(!ioctl_op(&second, HBOOT_FREE_BUFFER, unrelated));
+    assert(buffers.handle == h);
+    assert(ioctl_op(&second, HBOOT_SELECT_BUFFER, unrelated) == -EINVAL);
+    assert(first.f_pos == sizeof(payload) && second.f_pos == 7);
+    assert(buffers.handle == h);
+    assert(ioctl_op(&second, HBOOT_FREE_BUFFER, unrelated) == -1);
+    assert(ioctl_op(&second, HBOOT_FREE_BUFFER, -1) == -1);
+    assert(ioctl_op(&second, HBOOT_FREE_BUFFER, buffers.used) == -1);
+    assert(ioctl_op(&second, HBOOT_FREE_BUFFER, MAX_BUFFERS_COUNT) == -1);
+    assert(buffers.handle == h);
+    /* Failed selections/frees preserve usable global selection. */
+    assert(hbootctrl_write(&second, "abcdefgh", 8, &second.f_pos) == 8);
+    memcpy(payload + 7, "abcdefgh", 8);
+    snapshot_payload(h, actual, sizeof(actual));
+    assert(!memcmp(actual, payload, sizeof(actual)));
+    assert(!ioctl_op(&second, HBOOT_SELECT_BUFFER, h));
+    assert(first.f_pos == sizeof(payload) && second.f_pos == 0);
+    /* Free from the other descriptor invalidates the shared selection. */
+    first.f_pos = 2; second.f_pos = 4;
+    assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, h));
+    assert(buffers.handle == INVALID_BUFFER_HANDLE);
+    assert(hbootctrl_write(&first, "abcdefgh", 8, &first.f_pos) == -EINVAL);
+    assert(hbootctrl_write(&second, "abcdefgh", 8, &second.f_pos) == -EINVAL);
+    assert(ioctl_op(&second, HBOOT_SELECT_BUFFER, h) == -EINVAL);
+    assert(first.f_pos == 2 && second.f_pos == 4);
+    /* Fill the preferred last slot, then reuse the formerly selected slot. */
+    assert(alloc(B_TYPE_PLAIN, 8, 0) == unrelated);
+    assert(alloc(type, sizeof(payload), B_ATTR_VERIFY) == h);
+    assert(buffers.handle == INVALID_BUFFER_HANDLE);
+    rejected_writes(h);
+    assert(!ioctl_op(&second, HBOOT_SELECT_BUFFER, h));
+    assert(first.f_pos == 2 && second.f_pos == 0);
+    assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, h));
+    memset(payload, 'r', sizeof(payload));
+    assert(hbootctrl_write(&first, payload, sizeof(payload), &first.f_pos) == sizeof(payload));
+    snapshot_payload(h, actual, sizeof(actual));
+    assert(!memcmp(actual, payload, sizeof(actual)));
+    assert(buffers.bufs[h].container.abstract->checksum ==
+           (crc32((const uint8_t *)payload, sizeof(payload)) ^ 0xffffffff));
+}
 static void writes(int type)
 {
     char data[9000];
@@ -345,6 +445,7 @@ int main(void)
     };
     assert(sizeof(void *) == 4);
     assert(!buffers_init());
+    selection(B_TYPE_PLAIN); selection(B_TYPE_SCATTERED);
     writes(B_TYPE_PLAIN); writes(B_TYPE_SCATTERED);
     slot_reuse();
     reset();
@@ -371,8 +472,13 @@ int main(void)
         /* Snapshot verification is only for the paused boot, before contenders
          * run. A subsequent boot intentionally retains existing CRC semantics. */
         verify_snapshot = stage != 1;
-        if (stage == 1) race(stage, writer, contenders, 1);
-        else race(stage, boot, contenders, 4);
+        if (stage == 1) {
+            assert(race(stage, writer, contenders, 1) == 8);
+            assert(contenders[0].result == 0);
+            assert(buffers.handle == INVALID_BUFFER_HANDLE);
+            assert(hbootctrl_write(&second, "abcdefgh", 8, &second.f_pos) == -EINVAL);
+            assert(second.f_pos == 0);
+        } else race(stage, boot, contenders, 4);
     }
     reset();
     assert(alloc(B_TYPE_PLAIN, 8, 0) == 0);
