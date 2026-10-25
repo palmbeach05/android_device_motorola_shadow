@@ -132,10 +132,28 @@ crc = without_includes((source / 'crc32.c').read_text())
 mock = r'''
 static uint32_t expected_crc;
 static int verify_snapshot;
+static int verify_reuse, reuse_boot_handle;
+static void *reuse_snapshot[MAX_BUFFERS_COUNT];
 static void mock_transition(void *list, uint32_t count, bootfunc_t entry)
 {
     checkpoint(7);
     assert(entry && list);
+    if (verify_reuse) {
+        int i, j, expected = 0;
+        assert(entry == (bootfunc_t)buffers.bufs[reuse_boot_handle].container.plain->data);
+        for (i = 0; i < MAX_BUFFERS_COUNT; ++i) {
+            int matches = 0;
+            assert(buffers.bufs[i].container.generic == reuse_snapshot[i]);
+            for (j = 0; j < (int)count; ++j)
+                if (((uint32_t *)list)[j] == (uint32_t)reuse_snapshot[i]) ++matches;
+            if (reuse_snapshot[i] && i != reuse_boot_handle) {
+                assert(matches == 1);
+                ++expected;
+            } else assert(matches == 0);
+        }
+        assert(count == (uint32_t)expected);
+        verify_reuse = 0;
+    }
     if (verify_snapshot) {
         struct abstract_buffer *a;
         assert(count == 1);
@@ -206,7 +224,7 @@ static void *worker(void *arg)
 }
 /* Pause one real operation and prove all contenders reach the shared mutex
  * without completing. No sleeps or scheduler-timing assumptions. */
-static void race(int stage, struct job owner, struct job *others, int count)
+static int race(int stage, struct job owner, struct job *others, int count)
 {
     pthread_t threads[5];
     int i, baseline;
@@ -228,6 +246,92 @@ static void race(int stage, struct job owner, struct job *others, int count)
     pthread_mutex_unlock(&monitor);
     for (i = 0; i <= count; ++i) assert(!pthread_join(threads[i], NULL));
     assert(completed == count + 1);
+    return owner.result;
+}
+/* Snapshot live handles, allocations and payloads across every replacement. */
+static void check_live(void **live, char payload[MAX_BUFFERS_COUNT][8])
+{
+    int i;
+    mutex_lock(&hbootctrl_mutex);
+    assert(buffers.used == MAX_BUFFERS_COUNT);
+    for (i = 0; i < MAX_BUFFERS_COUNT; ++i) {
+        assert(buffers.bufs[i].container.generic == live[i]);
+        if (live[i])
+            assert(!memcmp(buffers.bufs[i].container.plain->data, payload[i], 8));
+    }
+    mutex_unlock(&hbootctrl_mutex);
+}
+static void replace_slot(int slot, void **live, char payload[MAX_BUFFERS_COUNT][8])
+{
+    assert(alloc(B_TYPE_PLAIN, 8, 0) == slot);
+    assert(!ioctl_op(&second, HBOOT_SELECT_BUFFER, slot));
+    first.f_pos = 0;
+    assert(hbootctrl_write(&first, payload[slot], 8, &first.f_pos) == 8);
+    assert(first.f_pos == 8);
+    live[slot] = buffers.bufs[slot].container.generic;
+    check_live(live, payload);
+}
+static void slot_reuse(void)
+{
+    void *live[MAX_BUFFERS_COUNT];
+    char payload[MAX_BUFFERS_COUNT][8];
+    int i, cycle, middle = MAX_BUFFERS_COUNT / 2;
+    struct hboot_buffer_req req = { 0, B_TYPE_PLAIN, 0, 8, 0 };
+    struct job allocation = { HBOOT_ALLOCATE_BUFFER, (unsigned long)&req, 0, 0 };
+    struct job other = allocation;
+    reset();
+    for (i = 0; i < MAX_BUFFERS_COUNT; ++i) {
+        memset(payload[i], 'a' + i, 8);
+        assert(alloc(B_TYPE_PLAIN, 8, 0) == i);
+        assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, i));
+        first.f_pos = 0;
+        assert(hbootctrl_write(&first, payload[i], 8, &first.f_pos) == 8);
+        live[i] = buffers.bufs[i].container.generic;
+    }
+    assert(alloc(B_TYPE_PLAIN, 8, 0) == INVALID_BUFFER_HANDLE);
+    check_live(live, payload);
+    /* Full extent, with the last slot still live. */
+    assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, 0)); live[0] = NULL;
+    replace_slot(0, live, payload);
+    assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, middle)); live[middle] = NULL;
+    replace_slot(middle, live, payload);
+    /* Last-slot preference, followed by deterministic earlier-hole reuse. */
+    assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, 0)); live[0] = NULL;
+    assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, middle)); live[middle] = NULL;
+    assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, MAX_BUFFERS_COUNT - 1));
+    live[MAX_BUFFERS_COUNT - 1] = NULL;
+    replace_slot(MAX_BUFFERS_COUNT - 1, live, payload);
+    replace_slot(0, live, payload);
+    replace_slot(middle, live, payload);
+    /* No reset: refill an entirely freed table at its existing extent. */
+    for (i = 0; i < MAX_BUFFERS_COUNT; ++i) {
+        assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, i)); live[i] = NULL;
+    }
+    replace_slot(MAX_BUFFERS_COUNT - 1, live, payload);
+    for (i = 0; i < MAX_BUFFERS_COUNT - 1; ++i) replace_slot(i, live, payload);
+    for (cycle = 0; cycle < MAX_BUFFERS_COUNT * 3; ++cycle) {
+        i = cycle % MAX_BUFFERS_COUNT;
+        assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, i)); live[i] = NULL;
+        replace_slot(i, live, payload);
+    }
+    /* Both requests reach the operation mutex; only the owner gets the hole. */
+    assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, middle)); live[middle] = NULL;
+    assert(race(1, allocation, &other, 1) == middle);
+    assert(other.result == INVALID_BUFFER_HANDLE);
+    assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, middle));
+    replace_slot(middle, live, payload);
+    /* The mocked handoff must include the replacement once and omit holes. */
+    assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, 0)); live[0] = NULL;
+    replace_slot(0, live, payload);
+    assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, 1)); live[1] = NULL;
+    assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, middle)); live[middle] = NULL;
+    check_live(live, payload);
+    memcpy(reuse_snapshot, live, sizeof(live));
+    reuse_boot_handle = MAX_BUFFERS_COUNT - 1;
+    verify_reuse = 1;
+    assert(ioctl_op(&first, HBOOT_BOOT, reuse_boot_handle) == -EBUSY);
+    assert(!verify_reuse);
+    check_live(live, payload);
 }
 int main(void)
 {
@@ -242,6 +346,7 @@ int main(void)
     assert(sizeof(void *) == 4);
     assert(!buffers_init());
     writes(B_TYPE_PLAIN); writes(B_TYPE_SCATTERED);
+    slot_reuse();
     reset();
     assert(ioctl_op(&first, HBOOT_FREE_BUFFER, -1) == -1);
     assert(ioctl_op(&first, HBOOT_FREE_BUFFER, MAX_BUFFERS_COUNT) == -1);
@@ -253,7 +358,7 @@ int main(void)
     /* Two allocations competing for the reusable last slot: one succeeds. */
     {
         struct job allocation = contenders[2], other = contenders[2];
-        race(1, allocation, &other, 1);
+        assert(race(1, allocation, &other, 1) == MAX_BUFFERS_COUNT - 1);
         assert(other.result == -1);
     }
     for (stage = 1; stage <= 7; ++stage) {
