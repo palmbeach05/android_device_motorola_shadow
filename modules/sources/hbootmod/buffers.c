@@ -51,6 +51,10 @@ struct generic_buffer
 
 		void *generic;
 	} container;
+#ifdef HBOOT_VERIFY_CRC32
+	/* Running byte-stream CRC; packed metadata holds the published checksum. */
+	uint32_t crc_context;
+#endif
 };
 
 struct buffers_ctx 
@@ -265,8 +269,9 @@ err:
 	return NULL;
 }
 
-static int append_scattered_buffer(struct scattered_buffer *sc, const char __user *data, size_t size, loff_t pos) 
+static int append_scattered_buffer(struct generic_buffer *buf, const char __user *data, size_t size, loff_t pos)
 {
+	struct scattered_buffer *sc = buf->container.scattered;
 	size_t written = 0;
 	size_t cur_size = 0;
 	size_t uncopied;
@@ -290,7 +295,7 @@ static int append_scattered_buffer(struct scattered_buffer *sc, const char __use
 		copied = cur_size - uncopied;
 #ifdef HBOOT_VERIFY_CRC32
 		if (copied && (BUFFER_ATTRS(sc) & B_ATTR_VERIFY))
-			crc32_update(&BUFFER_CHECKSUM(sc), (const uint8_t*)sc->chunks[chunk] + chunk_off, copied);
+			crc32_update(&buf->crc_context, (const uint8_t*)sc->chunks[chunk] + chunk_off, copied);
 #endif
 		written += copied;
 		if (uncopied)
@@ -327,8 +332,9 @@ static void free_plain_buffer(struct plain_buffer *pb)
 	free_high_mem(pb);
 }
 
-static int append_plain_buffer(struct plain_buffer *pb, const char __user *data, size_t size, loff_t pos)
+static int append_plain_buffer(struct generic_buffer *buf, const char __user *data, size_t size, loff_t pos)
 {
+	struct plain_buffer *pb = buf->container.plain;
 	size_t uncopied;
 	size_t copied;
 
@@ -342,7 +348,7 @@ static int append_plain_buffer(struct plain_buffer *pb, const char __user *data,
 	copied = size - uncopied;
 #ifdef HBOOT_VERIFY_CRC32
 	if (copied && (BUFFER_ATTRS(pb) & B_ATTR_VERIFY))
-		crc32_update(&BUFFER_CHECKSUM(pb), (const uint8_t*)pb->data + pos, copied);
+		crc32_update(&buf->crc_context, (const uint8_t*)pb->data + pos, copied);
 #endif
 	if (uncopied && !copied)
 		return -EFAULT;
@@ -415,6 +421,9 @@ int allocate_buffer(uint8_t tag, uint8_t type, uint8_t attrs, uint32_t bufsize, 
 	}
 	
 	init_abstract_buffer(ABSTRACT(data), tag, type, attrs, bufsize);
+#ifdef HBOOT_VERIFY_CRC32
+	crc32_init_ctx(&buf->crc_context);
+#endif
 	buf->container.generic = data;
 	return handle;
 }
@@ -460,10 +469,10 @@ int buffer_append_userdata(const char __user *data, size_t size, loff_t *ppos)
 	switch (BUFFER_TYPE(buf->container.abstract))
 	{
 		case B_TYPE_PLAIN:
-			ret = append_plain_buffer(buf->container.plain, data, size, *ppos);
+			ret = append_plain_buffer(buf, data, size, *ppos);
 			break;
 		case B_TYPE_SCATTERED:
-			ret = append_scattered_buffer(buf->container.scattered, data, size, *ppos);
+			ret = append_scattered_buffer(buf, data, size, *ppos);
 			break;
 		default:
 			ret = -EINVAL;
@@ -515,7 +524,12 @@ void *get_bootlist(uint32_t *listsize, int handle)
 		{
 #ifdef HBOOT_VERIFY_CRC32
 			if (BUFFER_ATTRS(buf->container.abstract) & B_ATTR_VERIFY)
-				crc32_final(&BUFFER_CHECKSUM(buf->container.abstract));
+			{
+				uint32_t checksum = buf->crc_context;
+
+				crc32_final(&checksum);
+				BUFFER_CHECKSUM(buf->container.abstract) = checksum;
+			}
 #endif
 
 			BUFFER_STATE(buf->container.abstract) = B_STAT_CREATED;
