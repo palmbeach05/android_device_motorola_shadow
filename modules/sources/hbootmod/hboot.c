@@ -258,7 +258,7 @@ static void disable_dss(void)
 	drv = dev->driver;
 	if (!drv) {
 		printk("Could not find omapdss driver\n");
-		return;
+		goto out_put_device;
 	}
 	plat_drv = to_platform_driver(drv);
 
@@ -266,10 +266,13 @@ static void disable_dss(void)
 
 	if (!plat_drv->suspend) {
 		printk("Could not find suspend in omapdss driver\n");
-		return;
+		goto out_put_device;
 	}
 	pt.event = 0;
 	plat_drv->suspend(plat_dev, pt);
+
+out_put_device:
+	put_device(dev);
 }
 
 /* Caller holds hbootctrl_mutex through preparation and the transition. */
