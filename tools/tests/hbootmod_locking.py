@@ -97,6 +97,8 @@ static size_t copy_from_user(void *to, const void *from, size_t size)
     size_t copied = min(copy_budget, size);
     checkpoint(1);
     memcpy(to, from, copied);
+    /* ARM copy_from_user() zero-pads the uncopied destination tail. */
+    memset((char *)to + copied, 0, size - copied);
     if (copy_budget != (size_t)-1) copy_budget -= copied;
     return size - copied;
 }
@@ -129,6 +131,18 @@ header += without_includes((source / 'hboot.h').read_text())
 header = re.sub(r'^(?:uint32_t|void) (?:get_high_\w+|free_high_\w+)\([^;]+;\n', '', header, flags=re.MULTILINE)
 crc = without_includes((source / 'crc32.c').read_text())
 mock = r'''
+static void snapshot_payload(int handle, char *data, size_t size);
+static uint32_t contents_crc(int handle)
+{
+    size_t size = BUFFER_SIZE(buffers.bufs[handle].container.abstract);
+    char *data = malloc(size);
+    uint32_t checksum;
+    assert(data);
+    snapshot_payload(handle, data, size);
+    checksum = crc32((const uint8_t *)data, size);
+    free(data);
+    return checksum;
+}
 static uint32_t expected_crc;
 static int verify_snapshot;
 static int verify_reuse, reuse_boot_handle;
@@ -144,7 +158,7 @@ static void mock_transition(void *list, uint32_t count, bootfunc_t entry)
         struct abstract_buffer *a = (void *)((uint32_t *)list)[i];
         for (int h = 0; h < buffers.used; ++h) {
             if (buffers.bufs[h].container.abstract == a && (a->attrs & B_ATTR_VERIFY))
-                assert(a->checksum == (buffers.bufs[h].crc_context ^ 0xffffffff));
+                assert(a->checksum == contents_crc(h));
         }
     }
 #endif
@@ -179,12 +193,20 @@ static void mock_transition(void *list, uint32_t count, bootfunc_t entry)
 '''
 tests = r'''
 static struct file first, second;
-static void check_running(int handle, const char *data, size_t size)
+static void check_published(int handle)
 {
+    uint32_t count;
+    struct abstract_buffer *a = buffers.bufs[handle].container.abstract;
+    uint32_t checksum = a->checksum;
+    mutex_lock(&hbootctrl_mutex);
+    get_bootlist(&count, INVALID_BUFFER_HANDLE);
 #ifdef HBOOT_VERIFY_CRC32
-    assert(buffers.bufs[handle].crc_context ==
-           (crc32((const uint8_t *)data, size) ^ 0xffffffff));
+    if (a->attrs & B_ATTR_VERIFY)
+        assert(a->checksum == contents_crc(handle));
+    else
 #endif
+        assert(a->checksum == checksum);
+    mutex_unlock(&hbootctrl_mutex);
 }
 static int ioctl_op(struct file *f, unsigned int cmd, unsigned long arg)
 { return hbootctrl_ioctl(NULL, f, cmd, arg); }
@@ -300,7 +322,7 @@ static void selection(int type)
     assert(hbootctrl_write(&first, payload, sizeof(payload), &first.f_pos) == sizeof(payload));
     snapshot_payload(h, actual, sizeof(actual));
     assert(!memcmp(actual, payload, sizeof(actual)));
-    check_running(h, payload, sizeof(payload));
+    check_published(h);
 }
 static void writes(int type)
 {
@@ -316,7 +338,7 @@ static void writes(int type)
         result = hbootctrl_write(&first, data, sizeof(data), &first.f_pos);
         assert(result == (limit ? limit : -EFAULT));
         assert(first.f_pos == limit);
-        check_running(h, data, limit);
+        check_published(h);
         copy_budget = (size_t)-1;
         if (limit < 9000) {
             assert(hbootctrl_write(&first, data + limit, 9000 - limit, &first.f_pos) == 9000 - limit);
@@ -335,15 +357,19 @@ static void prepare_crc(int handle, const char *data, size_t size, int attrs)
     uint32_t *list;
     struct abstract_buffer *a = buffers.bufs[handle].container.abstract;
     uint32_t checksum = a->checksum;
+    char actual[9000];
+    assert(size == BUFFER_SIZE(a) && size <= sizeof(actual));
     mutex_lock(&hbootctrl_mutex);
     for (int repeat = 0; repeat < 4; ++repeat) {
         list = get_bootlist(&count, 0);
         assert(count == 1 && list[0] == (uint32_t)a);
         assert(a->state == B_STAT_CREATED);
+        snapshot_payload(handle, actual, size);
+        assert(!memcmp(actual, data, size));
 #ifdef HBOOT_VERIFY_CRC32
         if (attrs & B_ATTR_VERIFY) {
             assert(a->checksum == crc32((const uint8_t *)data, size));
-            check_running(handle, data, size);
+            assert(a->checksum == contents_crc(handle));
         } else
 #endif
             assert(a->checksum == checksum);
@@ -352,52 +378,69 @@ static void prepare_crc(int handle, const char *data, size_t size, int attrs)
 }
 static void crc_lifecycle(int type, int attrs)
 {
-    char data[9000], actual[9000];
-    int h, i, copied;
-    /* Prefix ends just before, at and after a scattered chunk boundary. */
-    int prefixes[] = { PAGE_SIZE - 1, PAGE_SIZE, PAGE_SIZE + 1 };
-    for (i = 0; i < (int)sizeof(data); ++i) data[i] = (char)(i * 37 + 11);
-    for (int boundary = 0; boundary < 3; ++boundary) {
+    char data[9000], replacement[9000], actual[9000], expected[9000];
+    int h, i;
+    int offsets[] = { PAGE_SIZE - 1, PAGE_SIZE, PAGE_SIZE + 1, 2 * PAGE_SIZE + 3 };
+    for (i = 0; i < (int)sizeof(data); ++i) {
+        data[i] = (char)(i * 37 + 11);
+        replacement[i] = (char)(i * 19 + 53);
+    }
+    for (int boundary = 0; boundary < 4; ++boundary) {
         reset();
         assert(alloc(B_TYPE_PLAIN, 8, 0) == 0);
         h = alloc(type, sizeof(data), attrs);
         assert(h == 1);
-        /* Repeat without resetting buffers to exercise the reused slot. */
         for (int reuse = 0; reuse < 2; ++reuse) {
+            /* Initialize every logical byte, including on slot reuse. */
             assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, h));
-            for (int phase = 0; phase < 2; ++phase) {
-                int length = phase ? (int)sizeof(data) : prefixes[boundary];
-                loff_t before = first.f_pos;
-                struct abstract_buffer metadata = *buffers.bufs[h].container.abstract;
-#ifdef HBOOT_VERIFY_CRC32
-                uint32_t context = buffers.bufs[h].crc_context;
-#endif
-                /* No progress before and after preparation changes neither state. */
-                copy_budget = 0;
-                assert(hbootctrl_write(&first, data, 1, &first.f_pos) == -EFAULT);
-                assert(first.f_pos == before);
-                assert(!memcmp(&metadata, buffers.bufs[h].container.abstract, sizeof(metadata)));
-#ifdef HBOOT_VERIFY_CRC32
-                assert(buffers.bufs[h].crc_context == context);
-#endif
-                /* Fault after crossing a chunk boundary in the suffix. */
-                copied = phase ? PAGE_SIZE + 5 : 17;
-                copy_budget = copied;
-                assert(hbootctrl_write(&first, data + before, length - before,
-                                       &first.f_pos) == copied);
-                assert(first.f_pos == before + copied);
-                if (attrs & B_ATTR_VERIFY) check_running(h, data, first.f_pos);
-                copy_budget = (size_t)-1;
-                assert(hbootctrl_write(&first, data + first.f_pos, length - first.f_pos,
-                                       &first.f_pos) == length - before - copied);
-                assert(first.f_pos == length);
-                prepare_crc(h, data, length, attrs);
+            int prefix = offsets[boundary];
+            assert(hbootctrl_write(&first, data, prefix, &first.f_pos) == prefix);
+            assert(hbootctrl_write(&first, data + prefix, sizeof(data) - prefix,
+                                   &first.f_pos) == sizeof(data) - prefix);
+            if (type == B_TYPE_SCATTERED) {
+                struct scattered_buffer *sc = buffers.bufs[h].container.scattered;
+                size_t tail = sizeof(data) % sc->chunk_size;
+                /* Allocation padding must never contribute to the checksum. */
+                memset((char *)sc->chunks[sc->allocated_chunks - 1] + tail,
+                       0xa5 + reuse, sc->chunk_size - tail);
             }
-            snapshot_payload(h, actual, sizeof(actual));
-            assert(!memcmp(actual, data, sizeof(actual)));
+            prepare_crc(h, data, sizeof(data), attrs);
+            /* Successful reselection resets this descriptor's position. */
+            assert(!ioctl_op(&second, HBOOT_SELECT_BUFFER, h));
+            assert(hbootctrl_write(&second, replacement, sizeof(replacement),
+                                   &second.f_pos) == sizeof(replacement));
+            prepare_crc(h, replacement, sizeof(replacement), attrs);
+            assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, h));
+            assert(second.f_pos == sizeof(data));
+            assert(hbootctrl_write(&first, data, prefix, &first.f_pos) == prefix);
+            memcpy(expected, replacement, sizeof(expected));
+            memcpy(expected, data, prefix);
+            prepare_crc(h, expected, sizeof(expected), attrs);
+            /* Another descriptor overlaps the first, crossing a chunk boundary. */
+            second.f_pos = PAGE_SIZE - 7;
+            assert(hbootctrl_write(&second, replacement, 31, &second.f_pos) == 31);
+            memcpy(expected + PAGE_SIZE - 7, replacement, 31);
+            prepare_crc(h, expected, sizeof(expected), attrs);
+            for (int budget = 0; budget <= 17; budget += 17) {
+                int offset = offsets[boundary];
+                int length = min(PAGE_SIZE + 30, (int)sizeof(data) - offset);
+                int zero_end = type == B_TYPE_PLAIN ? offset + length :
+                    min((int)sizeof(data), ((offset + budget) / PAGE_SIZE + 1) * PAGE_SIZE);
+                first.f_pos = offset;
+                loff_t other_pos = second.f_pos;
+                copy_budget = budget;
+                assert(hbootctrl_write(&first, data, length, &first.f_pos) ==
+                       (budget ? budget : -EFAULT));
+                assert(first.f_pos == offset + budget && second.f_pos == other_pos);
+                memcpy(expected + offset, data, budget);
+                memset(expected + offset + budget, 0, zero_end - offset - budget);
+                copy_budget = (size_t)-1;
+                snapshot_payload(h, actual, sizeof(actual));
+                assert(!memcmp(actual, expected, sizeof(actual)));
+                prepare_crc(h, expected, sizeof(expected), attrs);
+            }
             assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, h));
             assert(alloc(type, sizeof(data), attrs) == h);
-            if (attrs & B_ATTR_VERIFY) check_running(h, data, 0);
         }
     }
 }
@@ -567,7 +610,7 @@ int main(void)
         assert(hbootctrl_write(&first, "abcdefgh", 8, &first.f_pos) == 8);
         expected_crc = crc32((const uint8_t *)"abcdefgh", 8);
         /* Payload snapshot applies to the paused owner; every transition
-         * checks published CRCs against private contexts above. */
+         * checks published CRCs against current contents above. */
         verify_snapshot = stage != 1;
         if (stage == 1) {
             assert(race(stage, writer, contenders, 1) == 8);
