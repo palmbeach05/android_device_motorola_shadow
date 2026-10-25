@@ -11,13 +11,13 @@
 #define CHUNK_SIZE						(PAGE_SIZE*PAGES_PER_CHUNK)
 
 #pragma pack(push, 1)
-struct plain_buffer 
+struct plain_buffer
 {
 	struct abstract_buffer a;
 	void *data;
 };
 
-struct scattered_buffer 
+struct scattered_buffer
 {
 	struct abstract_buffer a;
 	uint32_t chunk_size;
@@ -25,7 +25,7 @@ struct scattered_buffer
 	uint32_t chunks[0];
 };
 
-struct nand_buffer 
+struct nand_buffer
 {
 	struct abstract_buffer a;
 	uint32_t offset;
@@ -40,9 +40,9 @@ struct nand_buffer
 #define BUFFER_SIZE(p) (ABSTRACT(p)->size)
 #define BUFFER_CHECKSUM(p) (ABSTRACT(p)->checksum)
 
-struct generic_buffer 
+struct generic_buffer
 {
-	union 
+	union
 	{
 		struct plain_buffer *plain;
 		struct scattered_buffer *scattered;
@@ -53,7 +53,7 @@ struct generic_buffer
 	} container;
 };
 
-struct buffers_ctx 
+struct buffers_ctx
 {
 	int used;
 	int handle;
@@ -97,7 +97,7 @@ static int get_new_buffer(struct generic_buffer **pbuf)
 
 	if (buffers.used >= MAX_BUFFERS_COUNT)
 		return INVALID_BUFFER_HANDLE;
-	
+
 	handle = buffers.used++;
 	*pbuf = &buffers.bufs[handle];
 	(*pbuf)->container.generic = NULL;
@@ -188,27 +188,27 @@ void free_high_mem(void *ptr)
 	kfree(ptr);
 }
 
-uint32_t get_high_pages(unsigned int order) 
+uint32_t get_high_pages(unsigned int order)
 {
 	return get_high_allocation(0, order, 1);
 }
 
-void free_high_pages(void *p, unsigned int order) 
+void free_high_pages(void *p, unsigned int order)
 {
 	free_pages((unsigned long)p, order);
 }
 
-uint32_t get_high_page(void) 
+uint32_t get_high_page(void)
 {
 	return get_high_pages(0);
 }
 
-void free_high_page(void *p) 
+void free_high_page(void *p)
 {
 	return free_high_pages(p, 0);
 }
 
-static void init_abstract_buffer(struct abstract_buffer *ab, uint8_t tag, uint8_t type, uint8_t attrs, uint32_t size) 
+static void init_abstract_buffer(struct abstract_buffer *ab, uint8_t tag, uint8_t type, uint8_t attrs, uint32_t size)
 {
 	ab->tag = tag;
 	ab->state = B_STAT_NONE;
@@ -222,7 +222,7 @@ static void init_abstract_buffer(struct abstract_buffer *ab, uint8_t tag, uint8_
 #endif
 }
 
-static void free_scattered_buffer(struct scattered_buffer *sc) 
+static void free_scattered_buffer(struct scattered_buffer *sc)
 {
 	uint32_t i;
 	for (i = 0; i < sc->allocated_chunks; ++i)
@@ -236,7 +236,7 @@ static struct scattered_buffer *allocate_scattered_buffer(uint32_t bufsize, uint
 	struct scattered_buffer *sc;
 	uint32_t p;
 	size_t sc_size;
-	
+
 	if (bufsize == 0)
 		return NULL;
 
@@ -247,7 +247,7 @@ static struct scattered_buffer *allocate_scattered_buffer(uint32_t bufsize, uint
 
 	sc->allocated_chunks = 0;
 	sc->chunk_size = CHUNK_SIZE;
-	while (bufsize > 0) 
+	while (bufsize > 0)
 	{
 		p = get_high_pages(CHUNK_SIZE_ORDER);
 		if (p == 0)
@@ -265,7 +265,7 @@ err:
 	return NULL;
 }
 
-static int append_scattered_buffer(struct scattered_buffer *sc, const char __user *data, size_t size, loff_t pos) 
+static int append_scattered_buffer(struct scattered_buffer *sc, const char __user *data, size_t size, loff_t pos)
 {
 	size_t written = 0;
 	size_t cur_size = 0;
@@ -282,7 +282,7 @@ static int append_scattered_buffer(struct scattered_buffer *sc, const char __use
 
 	chunk = (uint32_t)pos / sc->chunk_size;
 	chunk_off = (uint32_t)pos % sc->chunk_size;
-	while (written < size) 
+	while (written < size)
 	{
 		cur_size = min(size - written, (size_t)(sc->chunk_size - chunk_off));
 		uncopied = copy_from_user((char*)sc->chunks[chunk] + chunk_off,
@@ -300,7 +300,7 @@ static int append_scattered_buffer(struct scattered_buffer *sc, const char __use
 	}
 	return written;
 }
-	
+
 static struct plain_buffer *allocate_plain_buffer(uint32_t bufsize, uint32_t rest) 
 {
 	struct plain_buffer *pb;
@@ -432,6 +432,8 @@ int free_buffer(int handle)
 	data = buf->container.generic;
 	type = BUFFER_TYPE(buf->container.abstract);
 	buf->container.generic = NULL;
+	if (buffers.handle == handle)
+		buffers.handle = INVALID_BUFFER_HANDLE;
 
 	free_typed_buffer(data, type);
 	return 0;
@@ -439,6 +441,9 @@ int free_buffer(int handle)
 
 int select_buffer(int handle) 
 {
+	if (get_buffer(handle) == NULL)
+		return -EINVAL;
+
 	buffers.handle = handle;
 	return 0;
 }
@@ -523,15 +528,16 @@ void *get_bootlist(uint32_t *listsize, int handle)
 	return (void*)list;
 }
 
-int buffers_init(void) 
+int buffers_init(void)
 {
+	buffers.handle = INVALID_BUFFER_HANDLE;
 	buffers.bootlist = (void*)get_high_mem(MAX_BUFFERS_COUNT*sizeof(void*));
 	if (buffers.bootlist == NULL)
 		return -1;
 	return 0;
 }
 
-void buffers_destroy(void) 
+void buffers_destroy(void)
 {
 	if (buffers.bootlist)
 		free_high_mem(buffers.bootlist);
