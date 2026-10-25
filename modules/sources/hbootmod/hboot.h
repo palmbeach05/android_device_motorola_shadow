@@ -28,7 +28,7 @@ typedef void (*bootfunc_t)(void *, uint32_t);
 bootfunc_t get_bootentry(uint32_t *bootsize, int handle);
 void *get_bootlist(uint32_t *listsize, int handle);
 
-struct hboot_buffer_req 
+struct hboot_buffer_req
 {
 	uint8_t tag;
 	uint8_t type;

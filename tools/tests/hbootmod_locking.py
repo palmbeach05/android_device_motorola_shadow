@@ -23,7 +23,8 @@ def without_includes(text):
 
 
 def function(text, signature):
-    start = re.search(re.escape(signature.rstrip()) + r'[^\S\n]*\n\{', text).start()
+    pattern = r'\s+'.join(re.escape(part) for part in signature.split())
+    start = re.search(pattern + r'[^\S\n]*\n\{', text).start()
     end = text.index('\n}', start) + 2
     return text[start:end]
 
