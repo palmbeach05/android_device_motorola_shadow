@@ -59,7 +59,6 @@ preamble = r'''
 #include <pthread.h>
 #include <sys/types.h>
 #define __user
-#define HBOOT_VERIFY_CRC32
 #define PAGE_SIZE 4096
 #define min(a,b) ((a) < (b) ? (a) : (b))
 #define KERN_INFO ""
@@ -138,6 +137,17 @@ static void mock_transition(void *list, uint32_t count, bootfunc_t entry)
 {
     checkpoint(7);
     assert(entry && list);
+#ifdef HBOOT_VERIFY_CRC32
+    /* Check every mocked preparation, including contenders after a paused boot.
+     * Returning here only drives host tests; hardware handoff does not return. */
+    for (uint32_t i = 0; i < count; ++i) {
+        struct abstract_buffer *a = (void *)((uint32_t *)list)[i];
+        for (int h = 0; h < buffers.used; ++h) {
+            if (buffers.bufs[h].container.abstract == a && (a->attrs & B_ATTR_VERIFY))
+                assert(a->checksum == (buffers.bufs[h].crc_context ^ 0xffffffff));
+        }
+    }
+#endif
     if (verify_reuse) {
         int i, j, expected = 0;
         assert(entry == (bootfunc_t)buffers.bufs[reuse_boot_handle].container.plain->data);
@@ -158,7 +168,10 @@ static void mock_transition(void *list, uint32_t count, bootfunc_t entry)
         struct abstract_buffer *a;
         assert(count == 1);
         a = (void *)((uint32_t *)list)[0];
-        assert(a->checksum == expected_crc && a->state == B_STAT_CREATED);
+#ifdef HBOOT_VERIFY_CRC32
+        assert(a->checksum == expected_crc);
+#endif
+        assert(a->state == B_STAT_CREATED);
         assert(!memcmp(buffers.bufs[1].container.plain->data, "abcdefgh", 8));
         verify_snapshot = 0;
     }
@@ -166,6 +179,13 @@ static void mock_transition(void *list, uint32_t count, bootfunc_t entry)
 '''
 tests = r'''
 static struct file first, second;
+static void check_running(int handle, const char *data, size_t size)
+{
+#ifdef HBOOT_VERIFY_CRC32
+    assert(buffers.bufs[handle].crc_context ==
+           (crc32((const uint8_t *)data, size) ^ 0xffffffff));
+#endif
+}
 static int ioctl_op(struct file *f, unsigned int cmd, unsigned long arg)
 { return hbootctrl_ioctl(NULL, f, cmd, arg); }
 static int alloc(int type, int size, int attrs)
@@ -280,8 +300,7 @@ static void selection(int type)
     assert(hbootctrl_write(&first, payload, sizeof(payload), &first.f_pos) == sizeof(payload));
     snapshot_payload(h, actual, sizeof(actual));
     assert(!memcmp(actual, payload, sizeof(actual)));
-    assert(buffers.bufs[h].container.abstract->checksum ==
-           (crc32((const uint8_t *)payload, sizeof(payload)) ^ 0xffffffff));
+    check_running(h, payload, sizeof(payload));
 }
 static void writes(int type)
 {
@@ -297,8 +316,7 @@ static void writes(int type)
         result = hbootctrl_write(&first, data, sizeof(data), &first.f_pos);
         assert(result == (limit ? limit : -EFAULT));
         assert(first.f_pos == limit);
-        assert(buffers.bufs[h].container.abstract->checksum ==
-               (crc32((const uint8_t *)data, limit) ^ 0xffffffff));
+        check_running(h, data, limit);
         copy_budget = (size_t)-1;
         if (limit < 9000) {
             assert(hbootctrl_write(&first, data + limit, 9000 - limit, &first.f_pos) == 9000 - limit);
@@ -309,6 +327,81 @@ static void writes(int type)
         assert(hbootctrl_write(&first, data, 1, &first.f_pos) == -EINVAL);
     }
 }
+
+/* Direct preparation calls retain the same caller-held operation mutex. */
+static void prepare_crc(int handle, const char *data, size_t size, int attrs)
+{
+    uint32_t count;
+    uint32_t *list;
+    struct abstract_buffer *a = buffers.bufs[handle].container.abstract;
+    uint32_t checksum = a->checksum;
+    mutex_lock(&hbootctrl_mutex);
+    for (int repeat = 0; repeat < 4; ++repeat) {
+        list = get_bootlist(&count, 0);
+        assert(count == 1 && list[0] == (uint32_t)a);
+        assert(a->state == B_STAT_CREATED);
+#ifdef HBOOT_VERIFY_CRC32
+        if (attrs & B_ATTR_VERIFY) {
+            assert(a->checksum == crc32((const uint8_t *)data, size));
+            check_running(handle, data, size);
+        } else
+#endif
+            assert(a->checksum == checksum);
+    }
+    mutex_unlock(&hbootctrl_mutex);
+}
+static void crc_lifecycle(int type, int attrs)
+{
+    char data[9000], actual[9000];
+    int h, i, copied;
+    /* Prefix ends just before, at and after a scattered chunk boundary. */
+    int prefixes[] = { PAGE_SIZE - 1, PAGE_SIZE, PAGE_SIZE + 1 };
+    for (i = 0; i < (int)sizeof(data); ++i) data[i] = (char)(i * 37 + 11);
+    for (int boundary = 0; boundary < 3; ++boundary) {
+        reset();
+        assert(alloc(B_TYPE_PLAIN, 8, 0) == 0);
+        h = alloc(type, sizeof(data), attrs);
+        assert(h == 1);
+        /* Repeat without resetting buffers to exercise the reused slot. */
+        for (int reuse = 0; reuse < 2; ++reuse) {
+            assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, h));
+            for (int phase = 0; phase < 2; ++phase) {
+                int length = phase ? (int)sizeof(data) : prefixes[boundary];
+                loff_t before = first.f_pos;
+                struct abstract_buffer metadata = *buffers.bufs[h].container.abstract;
+#ifdef HBOOT_VERIFY_CRC32
+                uint32_t context = buffers.bufs[h].crc_context;
+#endif
+                /* No progress before and after preparation changes neither state. */
+                copy_budget = 0;
+                assert(hbootctrl_write(&first, data, 1, &first.f_pos) == -EFAULT);
+                assert(first.f_pos == before);
+                assert(!memcmp(&metadata, buffers.bufs[h].container.abstract, sizeof(metadata)));
+#ifdef HBOOT_VERIFY_CRC32
+                assert(buffers.bufs[h].crc_context == context);
+#endif
+                /* Fault after crossing a chunk boundary in the suffix. */
+                copied = phase ? PAGE_SIZE + 5 : 17;
+                copy_budget = copied;
+                assert(hbootctrl_write(&first, data + before, length - before,
+                                       &first.f_pos) == copied);
+                assert(first.f_pos == before + copied);
+                if (attrs & B_ATTR_VERIFY) check_running(h, data, first.f_pos);
+                copy_budget = (size_t)-1;
+                assert(hbootctrl_write(&first, data + first.f_pos, length - first.f_pos,
+                                       &first.f_pos) == length - before - copied);
+                assert(first.f_pos == length);
+                prepare_crc(h, data, length, attrs);
+            }
+            snapshot_payload(h, actual, sizeof(actual));
+            assert(!memcmp(actual, data, sizeof(actual)));
+            assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, h));
+            assert(alloc(type, sizeof(data), attrs) == h);
+            if (attrs & B_ATTR_VERIFY) check_running(h, data, 0);
+        }
+    }
+}
+
 struct job { unsigned int cmd; unsigned long arg; int write, result; };
 static void *worker(void *arg)
 {
@@ -447,6 +540,10 @@ int main(void)
     assert(!buffers_init());
     selection(B_TYPE_PLAIN); selection(B_TYPE_SCATTERED);
     writes(B_TYPE_PLAIN); writes(B_TYPE_SCATTERED);
+    for (i = 0; i < 2; ++i) {
+        crc_lifecycle(B_TYPE_PLAIN, i ? B_ATTR_VERIFY : 0);
+        crc_lifecycle(B_TYPE_SCATTERED, i ? B_ATTR_VERIFY : 0);
+    }
     slot_reuse();
     reset();
     assert(ioctl_op(&first, HBOOT_FREE_BUFFER, -1) == -1);
@@ -469,8 +566,8 @@ int main(void)
         assert(!ioctl_op(&second, HBOOT_SELECT_BUFFER, 1));
         assert(hbootctrl_write(&first, "abcdefgh", 8, &first.f_pos) == 8);
         expected_crc = crc32((const uint8_t *)"abcdefgh", 8);
-        /* Snapshot verification is only for the paused boot, before contenders
-         * run. A subsequent boot intentionally retains existing CRC semantics. */
+        /* Payload snapshot applies to the paused owner; every transition
+         * checks published CRCs against private contexts above. */
         verify_snapshot = stage != 1;
         if (stage == 1) {
             assert(race(stage, writer, contenders, 1) == 8);
@@ -513,9 +610,11 @@ int main(void)
 with tempfile.TemporaryDirectory(prefix='hbootmod-locking-') as directory:
     test_source = Path(directory) / 'locking.c'
     executable = Path(directory) / 'locking'
-    test_source.write_text(preamble + header + crc + buffers + '\n' + mutex +
-                           '\n' + mock + boot + '\n' + control + tests)
-    subprocess.run([os.environ.get('CC', 'cc'), '-m32', '-std=gnu99', '-pthread',
-                    '-Wall', '-Wextra', '-Wno-unused-parameter',
-                    str(test_source), '-o', str(executable)], check=True, timeout=60)
-    subprocess.run([str(executable)], check=True, timeout=30)
+    for verify in (True, False):
+        configuration = '#define HBOOT_VERIFY_CRC32\n' if verify else ''
+        test_source.write_text(configuration + preamble + header + crc + buffers + '\n' + mutex +
+                               '\n' + mock + boot + '\n' + control + tests)
+        subprocess.run([os.environ.get('CC', 'cc'), '-m32', '-std=gnu99', '-pthread',
+                        '-Wall', '-Wextra', '-Wno-unused-parameter',
+                        str(test_source), '-o', str(executable)], check=True, timeout=60)
+        subprocess.run([str(executable)], check=True, timeout=30)
