@@ -1,0 +1,70 @@
+hbootmod baseline and validation record
+
+The successful device build cannot be reproduced from the evidence in this
+checkout. Do not identify the current source tip as the tested revision.
+Successful-build source revision: unconfirmed.
+Successful-build resolved kernel .config: unavailable.
+Successful-build compiler executable/version: unconfirmed; the retained ELF
+.comment records GCC: (GNU) 4.4.3.
+Successful-build artifact checksum: unconfirmed; compare the device-tested
+artifact with the retained file before declaring it the working baseline.
+
+Retained rollback candidate (unchanged by this patch):
+  bootstrap/modules/hbootmod.ko
+  SHA-256: 828d025ecb580e8c52f4c10d888b686c360953e6bde6544e06f6eaced775a1a2
+  ELF build ID: 4ffc84fbfb598c6705b69eae7b8616d802071c03
+  vermagic: 2.6.32.9 preempt mod_unload ARMv7
+  uts_release: 2.6.32.9-Jellybean
+These strings describe the module's host kernel, not the 2.6.32.71 destination
+kernel. Keep the working destination kernel and rollback artifact unchanged.
+Bootstrap packaging still selects this retained prebuilt.
+
+Checkout build settings (not confirmed successful-build inputs):
+  source snapshot before this patch: 4ecb75d37fa59df425408a547c424a62d10d85b8
+  kernel source: kernel/motorola/shadow
+  defconfig: shadow_cm11_defconfig (not a resolved .config)
+  toolchain: prebuilt/linux-x86/toolchain/arm-eabi-4.4.3/bin/arm-eabi-
+
+Release validation still required:
+- Obtain the tested module and record its checksum, exact module and host-kernel
+  source revisions, resolved .config, full compiler version, and build command.
+- Retain that artifact separately before rebuilding; verify the rollback copy
+  against its recorded checksum.
+- Build with those confirmed inputs, record the new checksum, and compare ELF
+  undefined symbols with the retained artifact list below. Investigate changes.
+- Verify system and recovery selections on hardware separately. UART operation
+  also needs a separate device check. Local mocked guards do not validate boot.
+
+This checkout has neither the confirmed kernel build inputs nor an ARM compiler
+or device runner. No fresh module build, import comparison against a fresh ELF,
+or device verification is claimed. The shipped BusyBox is ARM v1.21.1-jb;
+the guards use ash syntax and existing applets plus rm and exact-match awk.
+Execution with that shipped binary remains pending an ARM runner or device.
+
+Retained ELF undefined symbols (readelf -Ws, sorted):
+  __aeabi_uidiv
+  __aeabi_uidivmod
+  __aeabi_unwind_cpp_pr0
+  __copy_from_user
+  __get_free_pages
+  __kmalloc
+  __memzero
+  __register_chrdev
+  bi_battery_status_at_boot
+  bi_cid_recover_boot
+  bi_powerup_reason
+  device_find_child
+  free_pages
+  kfree
+  memset
+  msleep
+  omap_readw
+  omap_writew
+  param_get_int
+  param_set_int
+  platform_bus
+  preempt_schedule
+  printk
+  spi_sync
+  strlen
+  strncmp
