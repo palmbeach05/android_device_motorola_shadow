@@ -27,15 +27,15 @@ static DEFINE_MUTEX(hbootctrl_mutex);
 
 /* NOTE: 0x00100000 is mapped per sector, keep that in mind */
 
-#define MMU_48000000					0xFA000000
-#define MMU_49000000					0xFB000000
+#define MMU_48000000			0xFA000000
+#define MMU_49000000			0xFB000000
 
-#define MMU_SDMA_BASE					0xFA056000
+#define MMU_SDMA_BASE			0xFA056000
 
-#define MMU_UART3_BASE				0xFB020000
+#define MMU_UART3_BASE			0xFB020000
 
-#define MMU_CM_FCLKEN_PER			0xFA005000
-#define MMU_CM_ICLKEN_PER			0xFA005010
+#define MMU_CM_FCLKEN_PER		0xFA005000
+#define MMU_CM_ICLKEN_PER		0xFA005010
 
 /* Clock is 48 MHz, divided by 16 */
 #define UART_CLOCK_BASE_RATE	2995200
@@ -73,25 +73,25 @@ void reconfigure_emu_uart(uint32_t uart_speed)
 	__raw_writel(0x00, MMU_UART3_BASE + 0x04); /* Disable IRQs */
 
 	__raw_writel(0x80, MMU_UART3_BASE + 0x0C);
-	__raw_writel(0x06, MMU_UART3_BASE + 0x08); /* Disable FIFO */ 
+	__raw_writel(0x06, MMU_UART3_BASE + 0x08); /* Disable FIFO */
 
 	__raw_writel(0xBF, MMU_UART3_BASE + 0x0C);
-	
-	/* Clock divisor 
+
+	/* Clock divisor
 	 *
 	 * Determined based on uart_speed parameter:
-	 * UART_CLOCK_BASE_RATE / speed (i.e 0x1A for 115200 etc.) 
+	 * UART_CLOCK_BASE_RATE / speed (i.e 0x1A for 115200 etc.)
 	 */
-	
+
 	div = (UART_CLOCK_BASE_RATE / uart_speed) & 0x3FFF;
 	dll = div & 0xFF;
 	dlh = (div >> 8) & 0x3F;
-	
-	/* It's 14 bit 
+
+	/* It's 14 bit
 	 * 8 LSB bits goes to 0x00 register
 	 * 6 MSB bits goes to 0x04 register
 	 */
-	
+
 	__raw_writel(dll, MMU_UART3_BASE + 0x00);
 	__raw_writel(dlh, MMU_UART3_BASE + 0x04);
 
@@ -105,7 +105,7 @@ void reconfigure_emu_uart(uint32_t uart_speed)
 
 	/* Wait for it to be ready */
 	msleep(1);
-	
+
 	/* Test it */
 	__raw_writel('h', MMU_UART3_BASE + 0x00); while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0);
 	__raw_writel('b', MMU_UART3_BASE + 0x00); while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0);
@@ -428,4 +428,4 @@ int __init hbootmod_init(void)
 }
 
 module_init(hbootmod_init);
-MODULE_LICENSE("GPL"); 
+MODULE_LICENSE("GPL");
