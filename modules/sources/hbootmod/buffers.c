@@ -132,35 +132,93 @@ static int get_new_buffer(struct generic_buffer **pbuf)
 	return handle;
 }
 
-uint32_t get_high_mem(size_t size) 
+/*
+ * The device exposes 499 MiB (BoardConfig.mk). Limit each search to 128
+ * allocations and 8 MiB of payload, plus a small tracking array. Order-0
+ * chunks and the order-2 L1 table use at most 512 KiB and 2 MiB respectively;
+ * the byte limit also bounds retries for larger plain buffers. Requests above
+ * the byte limit fail rather than putting unbounded pressure on the host.
+ * Charge kmalloc requests by whole buddy blocks, conservatively covering slab
+ * rounding, and reserve that charge before allocating. No large stack array.
+ */
+#define HIGH_ALLOC_ATTEMPTS 128
+#define HIGH_ALLOC_BYTES (8UL * 1024 * 1024)
+
+static uint32_t get_high_allocation(size_t size, unsigned int order, int pages)
 {
-	uint32_t p;
-	while (1) 
+	uint32_t p = 0;
+	uint32_t *rejected = NULL;
+	unsigned int count = 0;
+	unsigned int attempt;
+	size_t charge;
+	size_t retained = 0;
+
+	if (pages)
 	{
-		p = (uint32_t)kmalloc(size, GFP_KERNEL);
-		if (p == 0)
+		if (order > get_order(HIGH_ALLOC_BYTES))
 			return 0;
-		else if (GOOD_ADDRESS(p)) 
-			return p;
 	}
+	else
+	{
+		if (!size || size > HIGH_ALLOC_BYTES)
+			return 0;
+		order = get_order(size);
+	}
+	charge = PAGE_SIZE << order;
+
+	for (attempt = 0; attempt < HIGH_ALLOC_ATTEMPTS; ++attempt)
+	{
+		if (charge > HIGH_ALLOC_BYTES - retained)
+			break;
+		if (pages)
+			p = (uint32_t)__get_free_pages(GFP_KERNEL, order);
+		else
+			p = (uint32_t)kmalloc(size, GFP_KERNEL);
+		if (!p || GOOD_ADDRESS(p))
+			break;
+
+		if (!rejected)
+			rejected = kmalloc(HIGH_ALLOC_ATTEMPTS * sizeof(*rejected),
+			                   GFP_KERNEL);
+		if (!rejected)
+		{
+			if (pages)
+				free_pages((unsigned long)p, order);
+			else
+				kfree((void*)p);
+			p = 0;
+			break;
+		}
+		rejected[count++] = p;
+		retained += charge;
+		p = 0;
+	}
+
+	while (count)
+	{
+		--count;
+		if (pages)
+			free_pages((unsigned long)rejected[count], order);
+		else
+			kfree((void*)rejected[count]);
+	}
+	kfree(rejected);
+	return p;
 }
 
-void free_high_mem(void *ptr) 
+uint32_t get_high_mem(size_t size)
+{
+	return get_high_allocation(size, 0, 0);
+}
+
+void free_high_mem(void *ptr)
 {
 	kfree(ptr);
 }
 
 uint32_t get_high_pages(unsigned int order) 
 {
-	uint32_t p;
-	while (1) 
-	{
-		p = (uint32_t)__get_free_pages(GFP_KERNEL, order);
-		if (p == 0)
-			return 0;
-		else if (GOOD_ADDRESS(p))
-			return p;
-	}
+	return get_high_allocation(0, order, 1);
 }
 
 void free_high_pages(void *p, unsigned int order) 
