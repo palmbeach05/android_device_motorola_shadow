@@ -4,6 +4,7 @@
 #include <asm/io.h>
 #include <linux/module.h>
 #include <linux/fs.h>
+#include <linux/mutex.h>
 #include <linux/cdev.h>
 #include <linux/sched.h>
 #include <linux/delay.h>
@@ -20,6 +21,9 @@
 #define CTRL_DEVNAME "hbootctrl"
 
 static int dev_major;
+
+/* All descriptors share buffer selection and buffer lifetime through handoff. */
+static DEFINE_MUTEX(hbootctrl_mutex);
 
 /* NOTE: 0x00100000 is mapped per sector, keep that in mind */
 
@@ -241,7 +245,8 @@ static void disable_dss(void)
     plat_drv->suspend(plat_dev, pt);
 }  
 
-int hboot_boot(int handle) 
+/* Caller holds hbootctrl_mutex through preparation and the transition. */
+static int hboot_boot(int handle)
 {
 	bootfunc_t boot_entry;
 	uint32_t bootsize, listsize;
@@ -334,12 +339,16 @@ static int hbootctrl_ioctl(struct inode *inode, struct file *file, unsigned int 
 	int handle;
 	struct hboot_buffer_req buf_req;
 
+	mutex_lock(&hbootctrl_mutex);
 	ret = 0;
 	switch (cmd) 
 	{
 		case HBOOT_ALLOCATE_BUFFER:
 			if (copy_from_user((void*)&buf_req, (void*)arg, sizeof(struct hboot_buffer_req)) != 0)
-				return -EINVAL;
+			{
+				ret = -EINVAL;
+				break;
+			}
 
 			ret = allocate_buffer(buf_req.tag, buf_req.type, buf_req.attrs, buf_req.size, buf_req.rest);
 			break;
@@ -366,12 +375,18 @@ static int hbootctrl_ioctl(struct inode *inode, struct file *file, unsigned int 
 			ret = -EINVAL;
 			break;
 	}
+	mutex_unlock(&hbootctrl_mutex);
 	return ret;
 }
 
 static int hbootctrl_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos) 
 {
-	return buffer_append_userdata(buf, count, ppos);
+	int ret;
+
+	mutex_lock(&hbootctrl_mutex);
+	ret = buffer_append_userdata(buf, count, ppos);
+	mutex_unlock(&hbootctrl_mutex);
+	return ret;
 }  
 
 static int find_my_dev(struct device *dev, void *data)                                                                                                                          

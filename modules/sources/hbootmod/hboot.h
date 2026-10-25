@@ -11,6 +11,12 @@ uint32_t get_high_pages(unsigned int order);
 void free_high_pages(void *p, unsigned int order);
 uint32_t get_high_page(void);
 void free_high_page(void *p);
+/*
+ * Runtime buffer operations require the caller-held control-interface operation
+ * mutex, including selection, user copies and boot lookup/CRC finalization.
+ * Keep it held while using returned pointers, through the boot handoff.
+ * buffers_init()/buffers_destroy() run only before control-device publication.
+ */
 int allocate_buffer(uint8_t tag, uint8_t type, uint8_t attrs, uint32_t size, uint32_t rest);
 int free_buffer(int handle);
 int select_buffer(int handle);
