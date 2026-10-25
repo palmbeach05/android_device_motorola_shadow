@@ -1,7 +1,6 @@
 #include <linux/slab.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
-#include <linux/spinlock.h>
 #include <asm/uaccess.h>
 #include "hboot.h"
 #include "crc32.h"
@@ -52,12 +51,10 @@ struct generic_buffer
 
 		void *generic;
 	} container;
-	spinlock_t buf_lock;
 };
 
 struct buffers_ctx 
 {
-	spinlock_t ctx_lock;
 	int used;
 	int handle;
 	void *bootlist;
@@ -66,69 +63,34 @@ struct buffers_ctx
 
 struct buffers_ctx buffers;
 
-static struct generic_buffer *__get_buffer_nolock(int handle) 
+/* Runtime callers hold the control-interface operation mutex. */
+static struct generic_buffer *get_buffer(int handle)
 {
-	struct generic_buffer *buf;
-
 	if ((handle < 0) || (handle >= MAX_BUFFERS_COUNT) ||
 	    (handle >= buffers.used) || (buffers.bufs[handle].container.generic == NULL))
 		return NULL;
-	
-	buf = &buffers.bufs[handle];
-	spin_lock(&buf->buf_lock);
-	return buf;
+
+	return &buffers.bufs[handle];
 }
 
-static struct generic_buffer *get_buffer(int handle)
-{
-	struct generic_buffer *ret;
-
-	spin_lock(&buffers.ctx_lock);
-	ret = __get_buffer_nolock(handle);
-	spin_unlock(&buffers.ctx_lock);
-	return ret;
-}
-
-static void put_buffer(struct generic_buffer *buf) 
-{
-	if (buf)
-		spin_unlock(&buf->buf_lock);
-}
-
-static int get_new_buffer(struct generic_buffer **pbuf) 
+static int get_new_buffer(struct generic_buffer **pbuf)
 {
 	int handle;
-	struct generic_buffer *buf;
 
-	spin_lock(&buffers.ctx_lock);
-	if (buffers.used > 0)
+	/* Preserve last-slot reuse; reservation and publication are serialized. */
+	if (buffers.used > 0 &&
+	    buffers.bufs[buffers.used - 1].container.generic == NULL)
 	{
-		handle = buffers.used - 1;
-		buf = &buffers.bufs[handle];
-		if (spin_trylock(&buf->buf_lock))
-		{
-			if (buf->container.generic == NULL)
-			{
-				/* Keep the slot locked until the caller publishes it. */
-				*pbuf = buf;
-				spin_unlock(&buffers.ctx_lock);
-				return handle;
-			}
-			spin_unlock(&buf->buf_lock);
-		}
+		*pbuf = &buffers.bufs[buffers.used - 1];
+		return buffers.used - 1;
 	}
-	
-	if (buffers.used >= MAX_BUFFERS_COUNT) 
-	{
-		spin_unlock(&buffers.ctx_lock);
+
+	if (buffers.used >= MAX_BUFFERS_COUNT)
 		return INVALID_BUFFER_HANDLE;
-	}
 	
 	handle = buffers.used++;
 	*pbuf = &buffers.bufs[handle];
-	spin_lock(&(*pbuf)->buf_lock);
 	(*pbuf)->container.generic = NULL;
-	spin_unlock(&buffers.ctx_lock);
 	return handle;
 }
 
@@ -444,7 +406,6 @@ int allocate_buffer(uint8_t tag, uint8_t type, uint8_t attrs, uint32_t bufsize, 
 	
 	init_abstract_buffer(ABSTRACT(data), tag, type, attrs, bufsize);
 	buf->container.generic = data;
-	put_buffer(buf);
 	return handle;
 }
 
@@ -461,7 +422,6 @@ int free_buffer(int handle)
 	data = buf->container.generic;
 	type = BUFFER_TYPE(buf->container.abstract);
 	buf->container.generic = NULL;
-	put_buffer(buf);
 
 	free_typed_buffer(data, type);
 	return 0;
@@ -469,9 +429,7 @@ int free_buffer(int handle)
 
 int select_buffer(int handle) 
 {
-	spin_lock(&buffers.ctx_lock);
 	buffers.handle = handle;
-	spin_unlock(&buffers.ctx_lock);
 	return 0;
 }
 
@@ -496,8 +454,6 @@ int buffer_append_userdata(const char __user *data, size_t size, loff_t *ppos)
 			ret = -EINVAL;
 			break;
 	}
-	
-	put_buffer(buf);
 	
 	if (ret > 0)
 		*ppos += ret;
@@ -525,8 +481,7 @@ bootfunc_t get_bootentry(uint32_t *bootsize, int handle)
 		ret = (bootfunc_t)buf->container.plain->data;
 		*bootsize = BUFFER_SIZE(buf->container.plain);
 	}
-	
-	put_buffer(buf);
+
 	return ret;
 }
 
@@ -535,7 +490,6 @@ void *get_bootlist(uint32_t *listsize, int handle)
 	uint32_t *list;
 	int i, j = 0;
 
-	spin_lock(&buffers.ctx_lock);
 	list = (uint32_t*)buffers.bootlist;
 	for (i = 0; i < buffers.used; ++i) 
 	{
@@ -556,17 +510,11 @@ void *get_bootlist(uint32_t *listsize, int handle)
 	}
 	
 	*listsize = j;
-	spin_unlock(&buffers.ctx_lock);
 	return (void*)list;
 }
 
 int buffers_init(void) 
 {
-	int i;
-
-	buffers.ctx_lock = SPIN_LOCK_UNLOCKED;
-	for (i = 0; i < MAX_BUFFERS_COUNT; ++i)
-		buffers.bufs[i].buf_lock = SPIN_LOCK_UNLOCKED;
 	buffers.bootlist = (void*)get_high_mem(MAX_BUFFERS_COUNT*sizeof(void*));
 	if (buffers.bootlist == NULL)
 		return -1;
