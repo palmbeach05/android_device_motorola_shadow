@@ -38,9 +38,9 @@
 #include <linux/spi/spi.h>
 #include <plat/system.h>
 #include <linux/irq.h>
-#include <linux/spi/spi.h>                                                                                                                                                       
-#include <linux/spi/cpcap.h>                                                                                                                                                     
-#include <linux/spi/cpcap-regbits.h> 
+#include <linux/spi/spi.h>
+#include <linux/spi/cpcap.h>
+#include <linux/spi/cpcap-regbits.h>
 
 #include <plat/dma.h>
 #include <plat/clock.h>
@@ -134,10 +134,10 @@
 
 #define  RESET_FAIL      1
 #define RAW_MOD_REG_BIT(val, mask, set) do { \
-    if (set) \
+	if (set) \
 		val |= mask; \
-    else \
-		 val &= ~mask; \
+	else \
+		val &= ~mask; \
 } while (0)
 
 struct cpcap_dev {
@@ -179,155 +179,150 @@ struct cpcap_dev {
  */
 static inline void raw_writel_reg(u32 value, u32 reg)
 {
-    unsigned int absolute_reg = (u32)OMAP_MCSPI_BASE + reg;
+	unsigned int absolute_reg = (u32)OMAP_MCSPI_BASE + reg;
 #if defined(LOCAL_DEVELOPER_DEBUG)
-    printk(KERN_ERR " raw write reg =0x%x value=0x%x \n", absolute_reg,
-            value);
+	printk(KERN_ERR " raw write reg =0x%x value=0x%x \n", absolute_reg,
+	       value);
 #endif
-    omap_writel(value, absolute_reg);
+	omap_writel(value, absolute_reg);
 }
 
 static inline u32 raw_readl_reg(u32 reg)
 {
-    u32 result;
-    unsigned int absolute_reg = (u32)OMAP_MCSPI_BASE + reg;
-    result = omap_readl(absolute_reg);
+	u32 result;
+	unsigned int absolute_reg = (u32)OMAP_MCSPI_BASE + reg;
+
+	result = omap_readl(absolute_reg);
 #if defined(LOCAL_DEVELOPER_DEBUG)
-    printk(KERN_ERR " raw read reg =0x%x result =0x%x  \n",
-            absolute_reg, result);
+	printk(KERN_ERR " raw read reg =0x%x result =0x%x  \n",
+	       absolute_reg, result);
 #endif
-    return result;
+	return result;
 }
 
 static void write_omap_mux_register(u16 offset, u8 mode, u8 input_en)
 {
-    u16 tmp_val, reg_val;
-    u32 reg = OMAP343X_CTRL_BASE + offset;
+	u16 tmp_val, reg_val;
+	u32 reg = OMAP343X_CTRL_BASE + offset;
 
-    reg_val = mode | (input_en << 8) | 0x0018;
-    tmp_val = omap_readw(reg) & ~(0x0007 | (1 << 8) | 0x0018);
-    reg_val = reg_val | tmp_val;
-    omap_writew(reg_val, reg);
+	reg_val = mode | (input_en << 8) | 0x0018;
+	tmp_val = omap_readw(reg) & ~(0x0007 | (1 << 8) | 0x0018);
+	reg_val = reg_val | tmp_val;
+	omap_writew(reg_val, reg);
 }
 
-
-static int cpcap_spi_access(struct spi_device *spi, u8 *buf,
-                size_t len)
+static int cpcap_spi_access(struct spi_device *spi, u8 *buf, size_t len)
 {
-    struct spi_message m;
-    struct spi_transfer t = 
-    {
-        .tx_buf = buf,
-        .len = len,
-        .rx_buf = buf,
-        .bits_per_word = 32,
-    };
-    spi_message_init(&m);
-    spi_message_add_tail(&t, &m);
-    return spi_sync(spi, &m);
+	struct spi_message m;
+	struct spi_transfer t = {
+		.tx_buf		= buf,
+		.len		= len,
+		.rx_buf		= buf,
+		.bits_per_word	= 32,
+	};
+
+	spi_message_init(&m);
+	spi_message_add_tail(&t, &m);
+	return spi_sync(spi, &m);
 }
 
 static int cpcap_config_for_read(struct spi_device *spi, unsigned short reg,
-                 unsigned short *data)
+				 unsigned short *data)
 {
-    int status = -ENOTTY;
-    u32 buf32;  /* force buf to be 32bit aligned */
-    u8 *buf = (u8 *) &buf32;
+	int status = -ENOTTY;
+	u32 buf32;  /* force buf to be 32bit aligned */
+	u8 *buf = (u8 *)&buf32;
 
-    if (spi != NULL) 
-    {
-        buf[3] = (reg >> 6) & 0x000000FF;
-        buf[2] = (reg << 2) & 0x000000FF;
-        buf[1] = 0;
-        buf[0] = 0;
-        status = cpcap_spi_access(spi, buf, 4);
-        if (status == 0)
-            *data = buf[0] | (buf[1] << 8);
-    }
-    return status;
+	if (spi != NULL) {
+		buf[3] = (reg >> 6) & 0x000000FF;
+		buf[2] = (reg << 2) & 0x000000FF;
+		buf[1] = 0;
+		buf[0] = 0;
+		status = cpcap_spi_access(spi, buf, 4);
+		if (status == 0)
+			*data = buf[0] | (buf[1] << 8);
+	}
+	return status;
 }
 
 static int cpcap_config_for_write(struct spi_device *spi, unsigned short reg,
-                  unsigned short data)
+				  unsigned short data)
 {
-    int status = -ENOTTY;
-    u32 buf32;  /* force buf to be 32bit aligned */
-    u8 *buf = (u8 *) &buf32;
+	int status = -ENOTTY;
+	u32 buf32;  /* force buf to be 32bit aligned */
+	u8 *buf = (u8 *)&buf32;
 
-    if (spi != NULL) 
-    {
-        buf[3] = ((reg >> 6) & 0x000000FF) | 0x80;
-        buf[2] = (reg << 2) & 0x000000FF;
-        buf[1] = (data >> 8) & 0x000000FF;
-        buf[0] = data & 0x000000FF;
-        status = cpcap_spi_access(spi, buf, 4);
-    }
+	if (spi != NULL) {
+		buf[3] = ((reg >> 6) & 0x000000FF) | 0x80;
+		buf[2] = (reg << 2) & 0x000000FF;
+		buf[1] = (data >> 8) & 0x000000FF;
+		buf[0] = data & 0x000000FF;
+		status = cpcap_spi_access(spi, buf, 4);
+	}
 
-    return status;
+	return status;
 }
 
 static int find_device(struct device *dev, void *data)
 {
-    if (!strncmp((char*)data, dev_name(dev), strlen((char*)data))) 
-        return 1;
+	if (!strncmp((char *)data, dev_name(dev), strlen((char *)data)))
+		return 1;
 
-    return 0;
-} 
+	return 0;
+}
 
 void activate_emu_uart(void)
 {
-    int i;
-    u16 tmp = 0;
-    struct device *cpcap = NULL;
-    struct cpcap_device *cpcap_dev;
-    struct spi_device *spi;
+	int i;
+	u16 tmp = 0;
+	struct device *cpcap = NULL;
+	struct cpcap_device *cpcap_dev;
+	struct spi_device *spi;
 
-    printk(KERN_INFO "Searching for cpcap_usb...\n");
+	printk(KERN_INFO "Searching for cpcap_usb...\n");
 
-		cpcap = device_find_child(&platform_bus, "cpcap_usb", find_device);
+	cpcap = device_find_child(&platform_bus, "cpcap_usb", find_device);
 
-    if (cpcap == NULL)
-        return;
+	if (cpcap == NULL)
+		return;
 
-    cpcap_dev = cpcap->platform_data;
-    if (cpcap_dev == NULL)
-        return;
+	cpcap_dev = cpcap->platform_data;
+	if (cpcap_dev == NULL)
+		return;
 
-    spi = cpcap_dev->spi;
+	spi = cpcap_dev->spi;
 
+	cpcap_config_for_read(spi, 18, &tmp);
+	printk(KERN_ALERT "Reading CPCAP vendor_version: 0x%04X\n", tmp);
 
-    cpcap_config_for_read(spi, 18, &tmp);
-    printk(KERN_ALERT "Reading CPCAP vendor_version: 0x%04X\n", tmp);
+	/*
+	 * Step 1:
+	 * Configure OMAP SCM to set all ULPI pin of USB OTG to SAFE MODE
+	 */
+	for (i = 0; i < 0x18; i += 2)
+		write_omap_mux_register(0x1A2 + i, 7, 0);
 
-    /*
-     * Step 1:
-     * Configure OMAP SCM to set all ULPI pin of USB OTG to SAFE MODE
-     */
-    for (i = 0; i < 0x18; i += 2)
-        write_omap_mux_register(0x1A2 + i, 7, 0);
+	/*
+	 * Step 2:
+	 * Configure CPCAP to route UART3 to USB port; Switch VBUSIN to supply
+	 * UART/USB transeiver and set VBUS standby mode 3
+	 */
+	cpcap_config_for_write(spi, 897, 0x0101);
+	cpcap_config_for_write(spi, 411, 0x014C);
 
-    /*
-     * Step 2:
-     * Configure CPCAP to route UART3 to USB port; Switch VBUSIN to supply
-     * UART/USB transeiver and set VBUS standby mode 3
-     */
-    cpcap_config_for_write(spi, 897, 0x0101);
-    cpcap_config_for_write(spi, 411, 0x014C);
+	/* Step 3:
+	 * Configure OMAP SCM to set ULPI port as UART3 function
+	 */
+	/*
+	 * Set UART2(3) RX pin in safe mode
+	 */
+	write_omap_mux_register(0x19E, 7, 0);
+	/*
+	 * Route UART2(3) TX to ULPIDATA0, RX to ULPIDATA1
+	 */
+	write_omap_mux_register(0x1AA, 2, 0);
+	write_omap_mux_register(0x1AC, 2, 1);
 
-    /* Step 3:
-     * Configure OMAP SCM to set ULPI port as UART3 function
-     */
-    /*
-     * Set UART2(3) RX pin in safe mode
-     */
-    write_omap_mux_register(0x19E, 7, 0);
-    /*
-     * Route UART2(3) TX to ULPIDATA0, RX to ULPIDATA1
-     */
-    write_omap_mux_register(0x1AA, 2, 0);
-    write_omap_mux_register(0x1AC, 2, 1);
-
-    printk
-        (KERN_ALERT "WARNING: MiniUSB port works in UART3 mode, "
-         "the USB functionality UNAVAILABLE!\n");
+	printk(KERN_ALERT "WARNING: MiniUSB port works in UART3 mode, "
+	       "the USB functionality UNAVAILABLE!\n");
 }

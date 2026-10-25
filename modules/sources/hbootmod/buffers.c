@@ -11,13 +11,13 @@
 #define CHUNK_SIZE						(PAGE_SIZE*PAGES_PER_CHUNK)
 
 #pragma pack(push, 1)
-struct plain_buffer 
+struct plain_buffer
 {
 	struct abstract_buffer a;
 	void *data;
 };
 
-struct scattered_buffer 
+struct scattered_buffer
 {
 	struct abstract_buffer a;
 	uint32_t chunk_size;
@@ -25,7 +25,7 @@ struct scattered_buffer
 	uint32_t chunks[0];
 };
 
-struct nand_buffer 
+struct nand_buffer
 {
 	struct abstract_buffer a;
 	uint32_t offset;
@@ -40,9 +40,9 @@ struct nand_buffer
 #define BUFFER_SIZE(p) (ABSTRACT(p)->size)
 #define BUFFER_CHECKSUM(p) (ABSTRACT(p)->checksum)
 
-struct generic_buffer 
+struct generic_buffer
 {
-	union 
+	union
 	{
 		struct plain_buffer *plain;
 		struct scattered_buffer *scattered;
@@ -53,7 +53,7 @@ struct generic_buffer
 	} container;
 };
 
-struct buffers_ctx 
+struct buffers_ctx
 {
 	int used;
 	int handle;
@@ -193,22 +193,22 @@ uint32_t get_high_pages(unsigned int order)
 	return get_high_allocation(0, order, 1);
 }
 
-void free_high_pages(void *p, unsigned int order) 
+void free_high_pages(void *p, unsigned int order)
 {
 	free_pages((unsigned long)p, order);
 }
 
-uint32_t get_high_page(void) 
+uint32_t get_high_page(void)
 {
 	return get_high_pages(0);
 }
 
-void free_high_page(void *p) 
+void free_high_page(void *p)
 {
 	return free_high_pages(p, 0);
 }
 
-static void init_abstract_buffer(struct abstract_buffer *ab, uint8_t tag, uint8_t type, uint8_t attrs, uint32_t size) 
+static void init_abstract_buffer(struct abstract_buffer *ab, uint8_t tag, uint8_t type, uint8_t attrs, uint32_t size)
 {
 	ab->tag = tag;
 	ab->state = B_STAT_NONE;
@@ -222,7 +222,7 @@ static void init_abstract_buffer(struct abstract_buffer *ab, uint8_t tag, uint8_
 #endif
 }
 
-static void free_scattered_buffer(struct scattered_buffer *sc) 
+static void free_scattered_buffer(struct scattered_buffer *sc)
 {
 	uint32_t i;
 	for (i = 0; i < sc->allocated_chunks; ++i)
@@ -236,7 +236,7 @@ static struct scattered_buffer *allocate_scattered_buffer(uint32_t bufsize, uint
 	struct scattered_buffer *sc;
 	uint32_t p;
 	size_t sc_size;
-	
+
 	if (bufsize == 0)
 		return NULL;
 
@@ -247,7 +247,7 @@ static struct scattered_buffer *allocate_scattered_buffer(uint32_t bufsize, uint
 
 	sc->allocated_chunks = 0;
 	sc->chunk_size = CHUNK_SIZE;
-	while (bufsize > 0) 
+	while (bufsize > 0)
 	{
 		p = get_high_pages(CHUNK_SIZE_ORDER);
 		if (p == 0)
@@ -283,7 +283,7 @@ static int append_scattered_buffer(struct generic_buffer *buf, const char __user
 
 	chunk = (uint32_t)pos / sc->chunk_size;
 	chunk_off = (uint32_t)pos % sc->chunk_size;
-	while (written < size) 
+	while (written < size)
 	{
 		cur_size = min(size - written, (size_t)(sc->chunk_size - chunk_off));
 		uncopied = copy_from_user((char*)sc->chunks[chunk] + chunk_off,
@@ -297,28 +297,28 @@ static int append_scattered_buffer(struct generic_buffer *buf, const char __user
 	}
 	return written;
 }
-	
-static struct plain_buffer *allocate_plain_buffer(uint32_t bufsize, uint32_t rest) 
+
+static struct plain_buffer *allocate_plain_buffer(uint32_t bufsize, uint32_t rest)
 {
 	struct plain_buffer *pb;
 
 	pb = (struct plain_buffer*)get_high_mem(sizeof(struct plain_buffer));
-	
+
 	if (pb == NULL)
 		return NULL;
-	
+
 	pb->data = (void*)get_high_mem(bufsize);
-	
+
 	if (pb->data == 0)
 	{
 		free_high_mem(pb);
 		return NULL;
 	}
-	
+
 	return pb;
 }
 
-static void free_plain_buffer(struct plain_buffer *pb) 
+static void free_plain_buffer(struct plain_buffer *pb)
 {
 	free_high_mem(pb->data);
 	free_high_mem(pb);
@@ -360,9 +360,9 @@ static void free_nand_buffer(struct nand_buffer *nd)
 	free_high_mem(nd);
 }
 
-void free_typed_buffer(void *buffer, uint8_t type) 
+void free_typed_buffer(void *buffer, uint8_t type)
 {
-	switch (type) 
+	switch (type)
 	{
 		case B_TYPE_PLAIN:
 			free_plain_buffer((struct plain_buffer*)buffer);
@@ -382,7 +382,7 @@ int allocate_buffer(uint8_t tag, uint8_t type, uint8_t attrs, uint32_t bufsize, 
 	void *data;
 	int handle;
 
-	switch (type) 
+	switch (type)
 	{
 		case B_TYPE_PLAIN:
 			data = allocate_plain_buffer(bufsize, rest);
@@ -402,18 +402,18 @@ int allocate_buffer(uint8_t tag, uint8_t type, uint8_t attrs, uint32_t bufsize, 
 		return INVALID_BUFFER_HANDLE;
 
 	handle = get_new_buffer(&buf);
-	if (handle == INVALID_BUFFER_HANDLE) 
+	if (handle == INVALID_BUFFER_HANDLE)
 	{
 		free_typed_buffer(data, type);
 		return INVALID_BUFFER_HANDLE;
 	}
-	
+
 	init_abstract_buffer(ABSTRACT(data), tag, type, attrs, bufsize);
 	buf->container.generic = data;
 	return handle;
 }
 
-int free_buffer(int handle) 
+int free_buffer(int handle)
 {
 	struct generic_buffer *buf;
 	uint8_t type;
@@ -433,7 +433,7 @@ int free_buffer(int handle)
 	return 0;
 }
 
-int select_buffer(int handle) 
+int select_buffer(int handle)
 {
 	if (get_buffer(handle) == NULL)
 		return -EINVAL;
@@ -442,7 +442,7 @@ int select_buffer(int handle)
 	return 0;
 }
 
-int buffer_append_userdata(const char __user *data, size_t size, loff_t *ppos) 
+int buffer_append_userdata(const char __user *data, size_t size, loff_t *ppos)
 {
 	struct generic_buffer *buf;
 	int ret;
@@ -463,20 +463,20 @@ int buffer_append_userdata(const char __user *data, size_t size, loff_t *ppos)
 			ret = -EINVAL;
 			break;
 	}
-	
+
 	if (ret > 0)
 		*ppos += ret;
-	
+
 	return ret;
 }
 
-bootfunc_t get_bootentry(uint32_t *bootsize, int handle) 
+bootfunc_t get_bootentry(uint32_t *bootsize, int handle)
 {
 	struct generic_buffer *buf;
 	bootfunc_t ret;
 
 	buf = get_buffer(handle);
-	
+
 	if (buf == NULL)
 		return NULL;
 
@@ -485,27 +485,27 @@ bootfunc_t get_bootentry(uint32_t *bootsize, int handle)
 	    ((uint32_t)buf->container.plain->data) & 0x3)
 		ret =  NULL;
 
-	else 
+	else
 	{
 		ret = (bootfunc_t)buf->container.plain->data;
 		*bootsize = BUFFER_SIZE(buf->container.plain);
 	}
-	
+
 	return ret;
 }
 
-void *get_bootlist(uint32_t *listsize, int handle) 
+void *get_bootlist(uint32_t *listsize, int handle)
 {
 	uint32_t *list;
 	int i, j = 0;
 
 	list = (uint32_t*)buffers.bootlist;
-	for (i = 0; i < buffers.used; ++i) 
+	for (i = 0; i < buffers.used; ++i)
 	{
 		struct generic_buffer *buf;
 
 		buf = &buffers.bufs[i];
-		if (handle != i && buf->container.generic != NULL) 
+		if (handle != i && buf->container.generic != NULL)
 		{
 #ifdef HBOOT_VERIFY_CRC32
 			if (BUFFER_ATTRS(buf->container.abstract) & B_ATTR_VERIFY)
@@ -550,12 +550,12 @@ void *get_bootlist(uint32_t *listsize, int handle)
 			j++;
 		}
 	}
-	
+
 	*listsize = j;
 	return (void*)list;
 }
 
-int buffers_init(void) 
+int buffers_init(void)
 {
 	buffers.handle = INVALID_BUFFER_HANDLE;
 	buffers.bootlist = (void*)get_high_mem(MAX_BUFFERS_COUNT*sizeof(void*));
@@ -564,7 +564,7 @@ int buffers_init(void)
 	return 0;
 }
 
-void buffers_destroy(void) 
+void buffers_destroy(void)
 {
 	if (buffers.bootlist)
 		free_high_mem(buffers.bootlist);
