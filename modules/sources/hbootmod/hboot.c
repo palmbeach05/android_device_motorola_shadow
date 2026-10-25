@@ -376,7 +376,7 @@ static int hbootctrl_write(struct file *file, const char __user *buf, size_t cou
 
 static int find_my_dev(struct device *dev, void *data)                                                                                                                          
 {                                                                                                                                                                                
-    char *drv_name = "UNKNOWN";
+    const char *drv_name = "UNKNOWN";
     if (dev->driver && dev->driver->name)
         drv_name = dev->driver->name;
 
