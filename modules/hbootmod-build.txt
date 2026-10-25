@@ -1,96 +1,54 @@
-hbootmod build baseline
+hbootmod source builds
 
-The authoritative source and Kbuild object list are in sources/hbootmod/.
-Android build rules are in sources/hbootmod/hbootmod.mk, separate from the
-Kbuild Makefile in that directory.
-Runtime sources are unchanged. The default still packages the known-good
-bootstrap/modules/hbootmod.ko. Source builds are explicitly selected; a failure
-does not fall back to that prebuilt. No stock artifacts are built in sources/,
-and ext_modules excludes sources/hbootmod/ from its recursive module collection.
+From the configured Android build root after lunch:
 
-Required inputs
+  make HBOOTMOD_FROM_SOURCE=true hbootmod
+  make HBOOTMOD_FROM_SOURCE=true systemimage
 
-Set HBOOTMOD_KERNEL_BUILD to the ARM kernel build tree to use. The caller may
-select KERNEL_OUT. For an out-of-tree kernel build, supply the output tree with
-its source links intact. The wrapper checks only that HBOOTMOD_KERNEL_BUILD is
-nonempty; Kbuild handles kernel-tree preparation, generated headers, config,
-and Module.symvers requirements and reports build-input errors.
+Keep HBOOTMOD_FROM_SOURCE=true on every source-build invocation. The default
+packages bootstrap/modules/hbootmod.ko; source mode selects only the generated
+module and does not fall back to the prebuilt on failure.
 
-Successful compilation does not establish runtime compatibility. Loading on the
-stock 2.6.32.9 kernel still requires compatible platform headers, configuration,
-exports and symbol versions. An arbitrary tree reporting 2.6.32.9 does not
-establish ABI compatibility.
-
-Use the existing Android GCC 4.4.3 toolchain by default, or explicitly set
-HBOOTMOD_CROSS_COMPILE to an appropriate absolute compiler prefix. No compiler
-version is rejected solely by its version string.
-
-Build and package (from the configured Android build root after lunch)
-
-  make HBOOTMOD_FROM_SOURCE=true HBOOTMOD_KERNEL_BUILD=/absolute/kernel-build hbootmod
-  make HBOOTMOD_FROM_SOURCE=true HBOOTMOD_KERNEL_BUILD=/absolute/kernel-build systemimage
-
-Keep both variables on every source-build invocation. The generated module is
+Source builds use the existing external-module Kbuild path, KERNEL_OUT and
+KERNEL_MAKE_FLAGS. They wait for the kernel image build to prepare the kernel
+output and symbol versions. sources/hbootmod/Makefile retains the object list.
+Kbuild builds in sources/hbootmod/ and retains its incremental build state;
+there is no separate source staging tree. The packaging input is
 out/target/product/shadow/obj/HBOOTMOD/hbootmod.ko (adjust for PRODUCT_OUT).
-PRODUCT_COPY_FILES selects exactly one producer for
-system/bootstrap/modules/hbootmod.ko. Source mode copies the generated file;
-prebuilt mode copies the original. hbootmod does not install by itself.
-Every selected source build recreates its isolated staging directory and invokes
-the existing Kbuild, so changed sources and kernel inputs are rebuilt. Unrelated
-modules, hbootuser and safestrapmenu retain their existing build paths.
+The hbootmod target builds this input; systemimage installs it through the sole
+PRODUCT_COPY_FILES recipe. Recursive collection excludes hbootmod from the
+unrelated module destinations. Switching modes recopies the selected input
+without forcing hbootmod recompilation.
 
-Validation before hardware testing
+Validation
 
-Record a real compile/link log for all five existing objects and hbootmod.ko.
-Using the toolchain's readelf and a host modinfo, inspect the generated module:
+Successful compilation does not establish load compatibility with the stock
+2.6.32.9 kernel. Verify platform headers, configuration, exports, vermagic and
+symbol CRCs against the loading kernel; a matching release string is insufficient.
+Record compilation and linking of all five objects and inspect the generated
+module with the toolchain's readelf and host modinfo before hardware testing.
 
-  arm-eabi-readelf -h -A -S out/target/product/shadow/obj/HBOOTMOD/hbootmod.ko
-  modinfo -F vermagic out/target/product/shadow/obj/HBOOTMOD/hbootmod.ko
-  arm-eabi-readelf -Ws out/target/product/shadow/obj/HBOOTMOD/hbootmod.ko
-  arm-eabi-readelf -x __versions out/target/product/shadow/obj/HBOOTMOD/hbootmod.ko
+Compare the generated module with system/bootstrap/modules/hbootmod.ko and the
+copies extracted from systemimage and target-files. Change a source, rebuild,
+and verify recompilation and reinstallation. Rebuild without changes to check
+incremental compilation. Switch to prebuilt mode and back and verify each
+installed file. Force a compiler failure and verify systemimage fails without
+copying the prebuilt. An old installed file can remain after a failure; do not
+deploy it as the result of that build. Run git diff --check.
 
-Confirm ARM ELF metadata and stock-compatible vermagic. Resolve every undefined
-import against the matching stock exports; compare each imported symbol CRC in
-__versions with the stock Module.symvers when modversions is enabled (otherwise
-__versions may be absent). Compare with the known-good prebuilt as supporting
-evidence, not as a substitute for stock inputs or a successful source build.
+Recovery precautions
 
-Compare the generated module with system/bootstrap/modules/hbootmod.ko using
-cmp, and check the extracted system image and target-files archive contain that
-same generated file. Make a temporary source change, rebuild systemimage with
-the same variables, verify recompilation and reinstallation, then restore it and
-rebuild. Leave HBOOTMOD_KERNEL_BUILD empty, select a nonexistent kernel build
-path, and separately force a compiler failure; each build must fail without
-producing a successful system image or copying the prebuilt. An old installed
-file can remain after a failed build; never deploy it as the result of that build. Run git diff --check.
+Retain the checked-in prebuilt. Omit HBOOTMOD_FROM_SOURCE or set it to false and
+rebuild systemimage to restore prebuilt packaging; verify the installed copy.
+Before device testing, prepare an independent bootloader/SBF restore route,
+the correct stock image and host tools, and a known-good image with the prebuilt.
+Bootstrap recovery alone is insufficient when testing the handoff module.
+Verify loading without force-loading, normal and recovery handoffs, and serial
+behavior in Android and TWRP. Record stock HBoot serial information first; do
+not assume rmmod is supported.
 
-Hardware gate and rollback
-
-Before merge, verify the source-built module loads on the stock 2.6.32.9 kernel
-without force-loading or compatibility overrides, and completes both normal and
-recovery handoffs. Record stock HBoot serial information before testing and check
-serial behavior in both Android and TWRP for regressions. Do not assume rmmod is
-supported. Keep optimizations and updates in a later stacked change after both
-boots are verified.
-
-Retain the checked-in prebuilt. To roll back packaging, omit HBOOTMOD_FROM_SOURCE
-or set it to false and rebuild systemimage; verify the installed file matches the
-prebuilt. Before deployment, prepare and verify an independent stock restore
-route (bootloader/SBF and the correct stock image with host tools) and a known-good
-image with the prebuilt module. Bootstrap recovery alone is not a rollback route
-when testing the module responsible for the handoff.
-
-Validation availability
-
-This checkout alone does not provide the prepared stock kernel tree, matching
-Module.symvers, Android build environment, ARM GCC 4.4.3 toolchain, or device.
-Build integration does not establish module compatibility. Actual compilation,
-linking, generated ELF/CRC checks, image packaging, rebuild/reinstall and hardware
-checks require those inputs and remain mandatory before merge.
-
-Local rule checks do not establish successful compilation or runtime
-compatibility. Check the nonempty HBOOTMOD_KERNEL_BUILD guard, delegation of
-kernel input validation to Kbuild (including when selecting KERNEL_OUT), and
-propagation of Kbuild failures and missing output files. Also check Makefile
-parsing in both modes, source/prebuilt selection, isolated staging, and the
-recursive collection exclusion.
+This checkout lacks the complete Android/kernel build environment, matching
+stock kernel inputs, ARM toolchain and hardware. Compilation, ELF/CRC checks,
+real image packaging and hardware validation remain unverified until performed
+in a suitable environment. Local dependency and packaging rule checks cannot
+establish those results.

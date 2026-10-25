@@ -195,7 +195,7 @@ KERNEL_TOOLCHAIN							:= $(ANDROID_BUILD_TOP)/prebuilt/linux-x86/toolchain/$(TA
 KERNEL_CROSS_COMPILE 						:= $(KERNEL_TOOLCHAIN)/arm-eabi-
 KERNEL_MAKE_FLAGS							+= ARCH=arm CROSS_COMPILE=$(KERNEL_CROSS_COMPILE) CC=$(KERNEL_CROSS_COMPILE)gcc
 
-# Bootstrap module; optional source builds use HBOOTMOD_KERNEL_BUILD.
+# Bootstrap module; optional source builds use the external-module Kbuild path.
 include $(DEVICE_PATH)/modules/sources/hbootmod/hbootmod.mk
 
 # --- Custom Module Build Logic ---
@@ -206,7 +206,7 @@ ext_modules:
 	$(hide) mkdir -p $(KERNEL_MODULES_OUT)
 	$(hide) mkdir -p $(DEVICE_PATH)/modules/prebuilt
 	@echo "--- Compiling and Gathering Shadow Modules ---"
-	$(hide) $(MAKE) -C $(TARGET_KERNEL_MODULES_EXT) modules KERNEL_DIR=$(KERNEL_OUT) $(KERNEL_MAKE_FLAGS)
+	$(hide) $(MAKE) -C $(TARGET_KERNEL_MODULES_EXT) modules KERNEL_DIR=$(KERNEL_OUT) $(KERNEL_MAKE_FLAGS) HBOOTMOD_FROM_SOURCE=$(HBOOTMOD_FROM_SOURCE)
 	$(hide) find $(TARGET_KERNEL_MODULES_EXT) -path "$(TARGET_KERNEL_MODULES_EXT)hbootmod" -prune -o -name "*.ko" -exec cp -v {} $(DEVICE_PATH)/modules/prebuilt/ \;
 	$(hide) cp -v $(KERNEL_OUT)/drivers/video/output.ko $(KERNEL_MODULES_OUT)/ || echo "output.ko not found in KERNEL_OUT"
 	$(hide) find $(TARGET_KERNEL_MODULES_EXT) -path "$(TARGET_KERNEL_MODULES_EXT)hbootmod" -prune -o -name "*.ko" -exec cp -v {} $(KERNEL_MODULES_OUT)/ \;
