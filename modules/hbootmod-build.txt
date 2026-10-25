@@ -1,6 +1,8 @@
 Stock-kernel hbootmod baseline
 
 The authoritative source and Kbuild object list are in sources/hbootmod/.
+Android build rules are in sources/hbootmod/hbootmod.mk, separate from the
+Kbuild Makefile in that directory.
 Runtime sources are unchanged. The default still packages the known-good
 bootstrap/modules/hbootmod.ko. Source builds are explicitly selected; a failure
 does not fall back to that prebuilt. No stock artifacts are built in sources/,

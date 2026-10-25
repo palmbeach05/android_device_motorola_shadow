@@ -196,7 +196,7 @@ KERNEL_CROSS_COMPILE 						:= $(KERNEL_TOOLCHAIN)/arm-eabi-
 KERNEL_MAKE_FLAGS							+= ARCH=arm CROSS_COMPILE=$(KERNEL_CROSS_COMPILE) CC=$(KERNEL_CROSS_COMPILE)gcc
 
 # Stock-kernel bootstrap module; never build against the custom KERNEL_OUT.
-include $(DEVICE_PATH)/modules/hbootmod.mk
+include $(DEVICE_PATH)/modules/sources/hbootmod/hbootmod.mk
 
 # --- Custom Module Build Logic ---
 TARGET_KERNEL_MODULES_EXT					:= $(DEVICE_PATH)/modules/sources/
