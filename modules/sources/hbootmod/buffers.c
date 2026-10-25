@@ -85,6 +85,16 @@ static int get_new_buffer(struct generic_buffer **pbuf)
 		return buffers.used - 1;
 	}
 
+	/* used is the high-water extent; reuse holes without moving live handles. */
+	for (handle = 0; handle < buffers.used - 1; ++handle)
+	{
+		if (buffers.bufs[handle].container.generic == NULL)
+		{
+			*pbuf = &buffers.bufs[handle];
+			return handle;
+		}
+	}
+
 	if (buffers.used >= MAX_BUFFERS_COUNT)
 		return INVALID_BUFFER_HANDLE;
 
