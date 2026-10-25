@@ -87,6 +87,8 @@ $BB_STATIC umount /data
 
 $BB_STATIC echo 18 > /sys/class/leds/lcd-backlight/brightness
 
+cd "$BOOT_DIR" || fail "Cannot enter $BOOT_DIR"
+
 $BB_STATIC echo "Inserting hbootmod..."
 if [ "$1" = "uart" ]; then
     $BB_STATIC insmod ./hbootmod.ko kill_dss=1 emu_uart=115200 || fail "Cannot load hbootmod (UART)"
