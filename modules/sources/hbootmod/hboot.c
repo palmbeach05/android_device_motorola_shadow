@@ -266,12 +266,20 @@ int hboot_boot(int handle)
 	build_l1_table(l1_table);
 
 	boot_entry = get_bootentry(&bootsize, handle);
-	if (boot_entry == NULL) 
+	if (boot_entry == NULL)
+	{
+		printk(KERN_ERR CTRL_DEVNAME ": Failed to get boot entry\n");
+		free_high_pages((void*)l1_mem, 2);
 		return -EINVAL;
+	}
 	
 	bootlist = get_bootlist(&listsize, handle);
-	if (bootlist == NULL) 
+	if (bootlist == NULL)
+	{
+		printk(KERN_ERR CTRL_DEVNAME ": Failed to get bootlist\n");
+		free_high_pages((void*)l1_mem, 2);
 		return -ENOMEM;
+	}
 		
 	/* UART - if desired */
 	if (emu_uart)
