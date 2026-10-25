@@ -40,8 +40,21 @@ static DEFINE_MUTEX(hbootctrl_mutex);
 /* Clock is 48 MHz, divided by 16 */
 #define UART_CLOCK_BASE_RATE	2995200
 
+static int emu_uart_divisor(int uart_speed, uint16_t *divisor)
+{
+	uint32_t quotient;
+
+	if (uart_speed <= 0)
+		return -EINVAL;
+	quotient = (uint32_t)UART_CLOCK_BASE_RATE / (uint32_t)uart_speed;
+	if (quotient == 0 || quotient > 0x3FFF)
+		return -EINVAL;
+	*divisor = quotient;
+	return 0;
+}
+
 /* We have MMU enabled, so pick the virt. address */
-void reconfigure_emu_uart(uint32_t uart_speed)
+void reconfigure_emu_uart(int uart_speed)
 {
 	uint32_t lcr;
 	uint32_t efr;
@@ -49,6 +62,9 @@ void reconfigure_emu_uart(uint32_t uart_speed)
 	uint32_t ier;
 	uint32_t dlh, dll;
 	uint16_t div;
+
+	if (emu_uart_divisor(uart_speed, &div))
+		return;
 
 	printk(KERN_INFO CTRL_DEVNAME ": Enabling clocks for UART3\n");
 	__raw_writel(__raw_readl(MMU_CM_FCLKEN_PER) | 0x0800, MMU_CM_FCLKEN_PER);
@@ -86,7 +102,6 @@ void reconfigure_emu_uart(uint32_t uart_speed)
 	 * UART_CLOCK_BASE_RATE / speed (i.e 0x1A for 115200 etc.)
 	 */
 
-	div = (UART_CLOCK_BASE_RATE / uart_speed) & 0x3FFF;
 	dll = div & 0xFF;
 	dlh = (div >> 8) & 0x3F;
 
@@ -104,7 +119,7 @@ void reconfigure_emu_uart(uint32_t uart_speed)
 	__raw_writel(0x00, MMU_UART3_BASE + 0x20);
 
 	printk(KERN_INFO CTRL_DEVNAME ": UART3 configured for %u baudrate (div = 0x%04x).\n",
-	       uart_speed, div);
+	       (unsigned int)uart_speed, div);
 	printk(KERN_INFO CTRL_DEVNAME ": UART3 registers: lcr[0x%4X], efr[0x%4X], mdr1[0x%4x], ier[0x%4X], dll[0x%4x], dlh[0x%4x]\n",
 	       lcr, efr, mdr1, ier, dll, dlh);
 
@@ -282,6 +297,11 @@ static int hboot_boot(int handle)
 	uint32_t bootsize, listsize;
 	void *bootlist;
 	uint32_t l1_mem, *l1_table;
+	uint16_t uart_divisor;
+
+	/* Zero disables UART; reject enabled rates before any boot preparation. */
+	if (emu_uart && emu_uart_divisor(emu_uart, &uart_divisor))
+		return -EINVAL;
 
 	l1_mem = get_high_pages(2);
 	if (l1_mem == 0) {
