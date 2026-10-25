@@ -70,7 +70,8 @@ static struct generic_buffer *__get_buffer_nolock(int handle)
 {
 	struct generic_buffer *buf;
 
-	if ((handle < 0) || (handle > buffers.used) || (buffers.bufs[handle].container.generic == NULL)) 
+	if ((handle < 0) || (handle >= MAX_BUFFERS_COUNT) ||
+	    (handle >= buffers.used) || (buffers.bufs[handle].container.generic == NULL))
 		return NULL;
 	
 	buf = &buffers.bufs[handle];
@@ -97,13 +98,24 @@ static void put_buffer(struct generic_buffer *buf)
 static int get_new_buffer(struct generic_buffer **pbuf) 
 {
 	int handle;
+	struct generic_buffer *buf;
 
 	spin_lock(&buffers.ctx_lock);
-	if (buffers.used > 0 && (spin_trylock(&buffers.bufs[buffers.used-1].buf_lock)))
+	if (buffers.used > 0)
 	{
-		if (buffers.bufs[buffers.used-1].container.generic == NULL)
-			buffers.used--;
-		spin_unlock(&buffers.bufs[buffers.used-1].buf_lock);
+		handle = buffers.used - 1;
+		buf = &buffers.bufs[handle];
+		if (spin_trylock(&buf->buf_lock))
+		{
+			if (buf->container.generic == NULL)
+			{
+				/* Keep the slot locked until the caller publishes it. */
+				*pbuf = buf;
+				spin_unlock(&buffers.ctx_lock);
+				return handle;
+			}
+			spin_unlock(&buf->buf_lock);
+		}
 	}
 	
 	if (buffers.used >= MAX_BUFFERS_COUNT) 
@@ -114,10 +126,9 @@ static int get_new_buffer(struct generic_buffer **pbuf)
 	
 	handle = buffers.used++;
 	*pbuf = &buffers.bufs[handle];
-	(*pbuf)->buf_lock = SPIN_LOCK_UNLOCKED;
+	spin_lock(&(*pbuf)->buf_lock);
 	(*pbuf)->container.generic = NULL;
 	spin_unlock(&buffers.ctx_lock);
-	spin_lock(&(*pbuf)->buf_lock);
 	return handle;
 }
 
@@ -228,30 +239,34 @@ static int append_scattered_buffer(struct scattered_buffer *sc, const char __use
 {
 	size_t written = 0;
 	size_t cur_size = 0;
+	size_t uncopied;
+	size_t copied;
 	int chunk;
 	int chunk_off;
 
-	if (pos >= BUFFER_SIZE(sc))
+	if (pos < 0 || pos >= BUFFER_SIZE(sc))
 		return -EINVAL;
 
-	if (BUFFER_SIZE(sc) < pos + size)
+	if (size > BUFFER_SIZE(sc) - pos)
 		size = BUFFER_SIZE(sc) - pos;
 
 	chunk = (uint32_t)pos / sc->chunk_size;
 	chunk_off = (uint32_t)pos % sc->chunk_size;
 	while (written < size) 
 	{
-		cur_size = min(size, sc->chunk_size - chunk_off);
-		if (!copy_from_user((char*)sc->chunks[chunk] + chunk_off, data + written, cur_size)) 
-		{
+		cur_size = min(size - written, (size_t)(sc->chunk_size - chunk_off));
+		uncopied = copy_from_user((char*)sc->chunks[chunk] + chunk_off,
+		                          data + written, cur_size);
+		copied = cur_size - uncopied;
 #ifdef HBOOT_VERIFY_CRC32
-			if (BUFFER_ATTRS(sc) & B_ATTR_VERIFY) 
-				crc32_update(&BUFFER_CHECKSUM(sc), (const uint8_t*)sc->chunks[chunk] + chunk_off, cur_size);
+		if (copied && (BUFFER_ATTRS(sc) & B_ATTR_VERIFY))
+			crc32_update(&BUFFER_CHECKSUM(sc), (const uint8_t*)sc->chunks[chunk] + chunk_off, copied);
 #endif
-			written += cur_size;
-			chunk++;
-			chunk_off = 0;
-		}
+		written += copied;
+		if (uncopied)
+			return written ? (int)written : -EFAULT;
+		chunk++;
+		chunk_off = 0;
 	}
 	return written;
 }
@@ -284,22 +299,24 @@ static void free_plain_buffer(struct plain_buffer *pb)
 
 static int append_plain_buffer(struct plain_buffer *pb, const char __user *data, size_t size, loff_t pos)
 {
-	if (pos >= BUFFER_SIZE(pb))
+	size_t uncopied;
+	size_t copied;
+
+	if (pos < 0 || pos >= BUFFER_SIZE(pb))
 		return -EINVAL;
 
-	if (BUFFER_SIZE(pb) < pos + size)
+	if (size > BUFFER_SIZE(pb) - pos)
 		size = BUFFER_SIZE(pb) - pos;
 
-	if (!copy_from_user((char*)pb->data + pos, data, size)) 
-	{
+	uncopied = copy_from_user((char*)pb->data + pos, data, size);
+	copied = size - uncopied;
 #ifdef HBOOT_VERIFY_CRC32
-		if (BUFFER_ATTRS(pb) & B_ATTR_VERIFY)
-			crc32_update(&BUFFER_CHECKSUM(pb), (char*)pb->data + pos, size);
+	if (copied && (BUFFER_ATTRS(pb) & B_ATTR_VERIFY))
+		crc32_update(&BUFFER_CHECKSUM(pb), (const uint8_t*)pb->data + pos, copied);
 #endif
-		return (int)size;
-	} 
-	else 
-		return 0;
+	if (uncopied && !copied)
+		return -EFAULT;
+	return (int)copied;
 }
 
 static struct nand_buffer *allocate_nand_buffer(uint32_t bufsize, uint32_t rest)
@@ -487,7 +504,11 @@ void *get_bootlist(uint32_t *listsize, int handle)
 
 int buffers_init(void) 
 {
+	int i;
+
 	buffers.ctx_lock = SPIN_LOCK_UNLOCKED;
+	for (i = 0; i < MAX_BUFFERS_COUNT; ++i)
+		buffers.bufs[i].buf_lock = SPIN_LOCK_UNLOCKED;
 	buffers.bootlist = (void*)get_high_mem(MAX_BUFFERS_COUNT*sizeof(void*));
 	if (buffers.bootlist == NULL)
 		return -1;
