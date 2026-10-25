@@ -271,9 +271,10 @@ static int find_device(struct device *dev, void *data)
 	return 0;
 }
 
-void activate_emu_uart(void)
+int activate_emu_uart(void)
 {
 	int i;
+	int ret = -ENODEV;
 	u16 tmp = 0;
 	struct device *cpcap = NULL;
 	struct cpcap_device *cpcap_dev;
@@ -283,16 +284,28 @@ void activate_emu_uart(void)
 
 	cpcap = device_find_child(&platform_bus, "cpcap_usb", find_device);
 
-	if (cpcap == NULL)
-		return;
+	if (cpcap == NULL) {
+		printk(KERN_ERR "UART preparation: cpcap_usb lookup failed\n");
+		return -ENODEV;
+	}
 
 	cpcap_dev = cpcap->platform_data;
-	if (cpcap_dev == NULL)
+	if (cpcap_dev == NULL) {
+		printk(KERN_ERR "UART preparation: missing CPCAP platform data\n");
 		goto out_put_device;
+	}
 
 	spi = cpcap_dev->spi;
+	if (spi == NULL) {
+		printk(KERN_ERR "UART preparation: missing CPCAP SPI device\n");
+		goto out_put_device;
+	}
 
-	cpcap_config_for_read(spi, 18, &tmp);
+	ret = cpcap_config_for_read(spi, 18, &tmp);
+	if (ret) {
+		printk(KERN_ERR "UART preparation: CPCAP vendor-version read failed: %d\n", ret);
+		goto out_put_device;
+	}
 	printk(KERN_ALERT "Reading CPCAP vendor_version: 0x%04X\n", tmp);
 
 	/*
@@ -307,8 +320,16 @@ void activate_emu_uart(void)
 	 * Configure CPCAP to route UART3 to USB port; Switch VBUSIN to supply
 	 * UART/USB transeiver and set VBUS standby mode 3
 	 */
-	cpcap_config_for_write(spi, 897, 0x0101);
-	cpcap_config_for_write(spi, 411, 0x014C);
+	ret = cpcap_config_for_write(spi, 897, 0x0101);
+	if (ret) {
+		printk(KERN_ERR "UART preparation: CPCAP routing write 897 failed: %d\n", ret);
+		goto out_put_device;
+	}
+	ret = cpcap_config_for_write(spi, 411, 0x014C);
+	if (ret) {
+		printk(KERN_ERR "UART preparation: CPCAP routing write 411 failed: %d\n", ret);
+		goto out_put_device;
+	}
 
 	/* Step 3:
 	 * Configure OMAP SCM to set ULPI port as UART3 function
@@ -328,4 +349,5 @@ void activate_emu_uart(void)
 
 out_put_device:
 	put_device(cpcap);
+	return ret;
 }

@@ -298,6 +298,7 @@ static int hboot_boot(int handle)
 	void *bootlist;
 	uint32_t l1_mem, *l1_table;
 	uint16_t uart_divisor;
+	int ret;
 
 	/* Zero disables UART; reject enabled rates before any boot preparation. */
 	if (emu_uart && emu_uart_divisor(emu_uart, &uart_divisor))
@@ -333,7 +334,11 @@ static int hboot_boot(int handle)
 
 	/* UART - if desired */
 	if (emu_uart) {
-		activate_emu_uart();
+		ret = activate_emu_uart();
+		if (ret) {
+			free_high_pages((void *)l1_mem, 2);
+			return ret;
+		}
 		reconfigure_emu_uart(emu_uart);
 	}
 
