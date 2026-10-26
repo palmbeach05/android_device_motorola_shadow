@@ -385,6 +385,9 @@ int allocate_buffer(uint8_t tag, uint8_t type, uint8_t attrs, uint32_t bufsize, 
 	void *data;
 	int handle;
 
+	if (tag > IMG_LAST_TAG)
+		return INVALID_BUFFER_HANDLE;
+
 	/* Read-only preflight under the caller-held operation mutex (#39). */
 	if (buffers.used >= MAX_BUFFERS_COUNT)
 	{
