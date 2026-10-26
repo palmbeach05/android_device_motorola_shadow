@@ -385,6 +385,16 @@ int allocate_buffer(uint8_t tag, uint8_t type, uint8_t attrs, uint32_t bufsize, 
 	void *data;
 	int handle;
 
+	/* Read-only preflight under the caller-held operation mutex (#39). */
+	if (buffers.used >= MAX_BUFFERS_COUNT)
+	{
+		for (handle = 0; handle < MAX_BUFFERS_COUNT; ++handle)
+			if (buffers.bufs[handle].container.generic == NULL)
+				break;
+		if (handle == MAX_BUFFERS_COUNT)
+			return INVALID_BUFFER_HANDLE;
+	}
+
 	switch (type)
 	{
 		case B_TYPE_PLAIN:

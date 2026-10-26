@@ -114,6 +114,7 @@ static int fail_pages, misalign_pages, fail_list, emu_uart = 115200, kill_dss = 
 static unsigned int allocations, routing, display, transitions;
 static unsigned int page_allocations, page_frees;
 static unsigned int mem_allocations, mem_frees;
+static unsigned int mem_attempts, page_attempts;
 static int fail_mem_after = -1, fail_chunk_after = -1;
 static int routing_status, display_status;
 struct mmio_event { char operation; uint32_t address, value; };
@@ -163,6 +164,7 @@ static void udelay(unsigned int duration)
 static uint32_t get_high_mem(size_t size)
 {
     void *p;
+    ++mem_attempts;
     ++allocations;
     if (fail_mem_after == 0) return 0;
     if (fail_mem_after > 0) --fail_mem_after;
@@ -176,6 +178,7 @@ static void free_high_mem(void *p) { if (p) ++mem_frees; free(p); }
 static uint32_t get_high_pages(unsigned int order)
 {
     void *p;
+    ++page_attempts;
     ++allocations;
     poll_reset(slow_stage, ready_after);
     checkpoint(2);
@@ -909,6 +912,40 @@ static void replace_slot(int slot, void **live, char payload[MAX_BUFFERS_COUNT][
     live[slot] = buffers.bufs[slot].container.generic;
     check_live(live, payload);
 }
+/* Issue #39: full-table rejection must precede every typed allocator. */
+static void full_table_rejection(void **live, char payload[MAX_BUFFERS_COUNT][8])
+{
+    struct buffers_ctx before = buffers;
+    struct plain_buffer metadata[MAX_BUFFERS_COUNT];
+    unsigned int mem_before = mem_attempts, pages_before = page_attempts;
+    unsigned int mem_freed = mem_frees, pages_freed = page_frees;
+    int i, type, direct;
+    first.f_pos = 3;
+    second.f_pos = 7;
+    for (i = 0; i < MAX_BUFFERS_COUNT; ++i)
+        memcpy(&metadata[i], buffers.bufs[i].container.plain, sizeof(metadata[i]));
+    for (type = B_TYPE_PLAIN; type <= B_TYPE_NAND; ++type) {
+        for (direct = 0; direct < 2; ++direct) {
+            if (direct) {
+                mutex_lock(&hbootctrl_mutex);
+                assert(allocate_buffer(9, type, B_ATTR_VERIFY, CHUNK_SIZE + 17, 123)
+                       == INVALID_BUFFER_HANDLE);
+                mutex_unlock(&hbootctrl_mutex);
+            } else assert(alloc(type, CHUNK_SIZE + 17, B_ATTR_VERIFY)
+                          == INVALID_BUFFER_HANDLE);
+            assert(mem_attempts == mem_before && page_attempts == pages_before);
+            assert(mem_frees == mem_freed && page_frees == pages_freed);
+            assert(!memcmp(&before, &buffers, sizeof(before)));
+            assert(first.f_pos == 3 && second.f_pos == 7);
+            check_live(live, payload);
+            for (i = 0; i < MAX_BUFFERS_COUNT; ++i)
+                assert(!memcmp(&metadata[i], buffers.bufs[i].container.plain,
+                               sizeof(metadata[i])));
+            assert(!pthread_mutex_trylock(&hbootctrl_mutex));
+            pthread_mutex_unlock(&hbootctrl_mutex);
+        }
+    }
+}
 static void slot_reuse(void)
 {
     void *live[MAX_BUFFERS_COUNT];
@@ -926,12 +963,23 @@ static void slot_reuse(void)
         assert(hbootctrl_write(&first, payload[i], 8, &first.f_pos) == 8);
         live[i] = buffers.bufs[i].container.generic;
     }
-    assert(alloc(B_TYPE_PLAIN, 8, 0) == INVALID_BUFFER_HANDLE);
+    full_table_rejection(live, payload);
     check_live(live, payload);
     /* Full extent, with the last slot still live. */
     assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, 0)); live[0] = NULL;
     replace_slot(0, live, payload);
     assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, middle)); live[middle] = NULL;
+    /* A failed allocation must leave the available hole unpublished. */
+    for (int type = B_TYPE_PLAIN; type <= B_TYPE_NAND; ++type) {
+        struct buffers_ctx before = buffers;
+        unsigned int attempted = mem_attempts;
+        fail_mem_after = 0;
+        assert(alloc(type, 8, 0) == INVALID_BUFFER_HANDLE);
+        fail_mem_after = -1;
+        assert(mem_attempts == attempted + 1);
+        assert(!memcmp(&before, &buffers, sizeof(before)));
+        check_live(live, payload);
+    }
     replace_slot(middle, live, payload);
     /* Last-slot preference, followed by deterministic earlier-hole reuse. */
     assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, 0)); live[0] = NULL;
@@ -954,7 +1002,11 @@ static void slot_reuse(void)
     }
     /* Both requests reach the operation mutex; only the owner gets the hole. */
     assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, middle)); live[middle] = NULL;
-    assert(race(1, allocation, &other, 1) == middle);
+    {
+        unsigned int mem_before = mem_attempts, pages_before = page_attempts;
+        assert(race(1, allocation, &other, 1) == middle);
+        assert(mem_attempts == mem_before + 2 && page_attempts == pages_before);
+    }
     assert(other.result == INVALID_BUFFER_HANDLE);
     assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, middle));
     replace_slot(middle, live, payload);
