@@ -8,7 +8,7 @@
 #define GOOD_ADDRESS(p)				(__pa(p) >= 0x88c00000)
 #define CHUNK_SIZE_ORDER			0
 #define PAGES_PER_CHUNK				(1 << CHUNK_SIZE_ORDER)
-#define CHUNK_SIZE						(PAGE_SIZE*PAGES_PER_CHUNK)
+#define CHUNK_SIZE					(PAGE_SIZE*PAGES_PER_CHUNK)
 
 #pragma pack(push, 1)
 struct plain_buffer
@@ -388,7 +388,7 @@ int allocate_buffer(uint8_t tag, uint8_t type, uint8_t attrs, uint32_t bufsize, 
 	if (tag > IMG_LAST_TAG)
 		return INVALID_BUFFER_HANDLE;
 
-	/* Read-only preflight under the caller-held operation mutex (#39). */
+	/* Read-only preflight under the caller-held operation mutex */
 	if (buffers.used >= MAX_BUFFERS_COUNT)
 	{
 		for (handle = 0; handle < MAX_BUFFERS_COUNT; ++handle)
