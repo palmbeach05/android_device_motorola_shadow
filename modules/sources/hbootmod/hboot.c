@@ -27,15 +27,15 @@ static DEFINE_MUTEX(hbootctrl_mutex);
 
 /* NOTE: 0x00100000 is mapped per sector, keep that in mind */
 
-#define MMU_48000000		0xFA000000
-#define MMU_49000000		0xFB000000
+#define MMU_48000000			0xFA000000
+#define MMU_49000000			0xFB000000
 
-#define MMU_SDMA_BASE		0xFA056000
+#define MMU_SDMA_BASE			0xFA056000
 
-#define MMU_UART3_BASE		0xFB020000
+#define MMU_UART3_BASE			0xFB020000
 
-#define MMU_CM_FCLKEN_PER	0xFA005000
-#define MMU_CM_ICLKEN_PER	0xFA005010
+#define MMU_CM_FCLKEN_PER		0xFA005000
+#define MMU_CM_ICLKEN_PER		0xFA005010
 
 /* Clock is 48 MHz, divided by 16 */
 #define UART_CLOCK_BASE_RATE	2995200
