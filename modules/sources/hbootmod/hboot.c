@@ -27,15 +27,15 @@ static DEFINE_MUTEX(hbootctrl_mutex);
 
 /* NOTE: 0x00100000 is mapped per sector, keep that in mind */
 
-#define MMU_48000000			0xFA000000
-#define MMU_49000000			0xFB000000
+#define MMU_48000000		0xFA000000
+#define MMU_49000000		0xFB000000
 
-#define MMU_SDMA_BASE			0xFA056000
+#define MMU_SDMA_BASE		0xFA056000
 
-#define MMU_UART3_BASE			0xFB020000
+#define MMU_UART3_BASE		0xFB020000
 
-#define MMU_CM_FCLKEN_PER		0xFA005000
-#define MMU_CM_ICLKEN_PER		0xFA005010
+#define MMU_CM_FCLKEN_PER	0xFA005000
+#define MMU_CM_ICLKEN_PER	0xFA005010
 
 /* Clock is 48 MHz, divided by 16 */
 #define UART_CLOCK_BASE_RATE	2995200
@@ -298,6 +298,7 @@ static int hboot_boot(int handle)
 	void *bootlist;
 	uint32_t l1_mem, *l1_table;
 	uint16_t uart_divisor;
+	int ret;
 
 	/* Zero disables UART; reject enabled rates before any boot preparation. */
 	if (emu_uart && emu_uart_divisor(emu_uart, &uart_divisor))
@@ -333,7 +334,11 @@ static int hboot_boot(int handle)
 
 	/* UART - if desired */
 	if (emu_uart) {
-		activate_emu_uart();
+		ret = hboot_activate_emu_uart();
+		if (ret) {
+			free_high_pages((void *)l1_mem, 2);
+			return ret;
+		}
 		reconfigure_emu_uart(emu_uart);
 	}
 
