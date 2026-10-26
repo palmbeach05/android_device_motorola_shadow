@@ -111,6 +111,8 @@ static size_t copy_from_user(void *to, const void *from, size_t size)
 }
 static int fail_pages, misalign_pages, fail_list, emu_uart = 115200, kill_dss = 1;
 static unsigned int allocations, routing, display, transitions;
+static unsigned int page_allocations, page_frees;
+static int routing_status;
 struct mmio_event { char operation; uint32_t address, value; };
 static struct mmio_event mmio[128];
 static unsigned int mmio_count;
@@ -145,12 +147,18 @@ static uint32_t get_high_pages(unsigned int order)
     checkpoint(2);
     if (fail_pages) return 0;
     assert(!posix_memalign(&p, 16384, PAGE_SIZE << order));
+    ++page_allocations;
     memset(p, 0, PAGE_SIZE << order);
     return (uint32_t)p + (misalign_pages ? 4 : 0);
 }
-static void free_high_pages(void *p, unsigned int order) { (void)order; free((char *)p - (misalign_pages ? 4 : 0)); }
+static void free_high_pages(void *p, unsigned int order) { (void)order; ++page_frees; free((char *)p - (misalign_pages ? 4 : 0)); }
 static void build_l1_table(uint32_t *table) { (void)table; }
-static void activate_emu_uart(void) { ++routing; checkpoint(5); }
+static pthread_mutex_t hbootctrl_mutex;
+static int activate_emu_uart(void)
+{
+    assert(pthread_mutex_trylock(&hbootctrl_mutex) == EBUSY);
+    ++routing; checkpoint(5); return routing_status;
+}
 static void disable_dss(void) { ++display; checkpoint(6); }
 '''
 # Headers supply the real ABI and declarations; allocator mocks above are static.
@@ -342,6 +350,40 @@ static void uart_rates(void)
         assert(allocations == 1 && routing == 1 && display == 1 && transitions == 1);
         assert(mmio_count);
     }
+    emu_uart = 115200;
+}
+/* Mocked later success exercises control flow only; it is not hardware recovery. */
+static void uart_routing_errors(void)
+{
+    const int errors[] = { -ENODEV, -EIO, -ETIMEDOUT, -121 };
+    unsigned int i;
+    reset();
+    assert(alloc(B_TYPE_PLAIN, 8, 0) == 0);
+    emu_uart = 115200;
+    for (i = 0; i < sizeof(errors) / sizeof(errors[0]); ++i) {
+        unsigned int allocated = page_allocations, freed = page_frees;
+        allocations = routing = display = transitions = mmio_count = 0;
+        routing_status = errors[i];
+        assert(ioctl_op(&first, HBOOT_BOOT, 0) == errors[i]);
+        assert(page_allocations == allocated + 1 && page_frees == freed + 1);
+        assert(allocations == 1 && routing == 1);
+        assert(!display && !transitions && !mmio_count);
+        assert(!pthread_mutex_trylock(&hbootctrl_mutex));
+        pthread_mutex_unlock(&hbootctrl_mutex);
+    }
+    routing_status = 0;
+    allocations = routing = display = transitions = 0;
+    assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EBUSY);
+    assert(allocations == 1 && routing == 1 && display == 1 && transitions == 1);
+    assert(mmio_count && page_allocations == page_frees);
+    /* Disabled UART must not consult even a failing activation mock. */
+    emu_uart = 0;
+    routing_status = -EIO;
+    allocations = routing = display = transitions = 0;
+    assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EBUSY);
+    assert(allocations == 1 && !routing && display == 1 && transitions == 1);
+    assert(!mmio_count && page_allocations == page_frees);
+    routing_status = 0;
     emu_uart = 115200;
 }
 static void snapshot_payload(int handle, char *data, size_t size)
@@ -701,6 +743,7 @@ int main(void)
     assert(sizeof(void *) == 4);
     assert(!buffers_init());
     uart_rates();
+    uart_routing_errors();
     selection(B_TYPE_PLAIN); selection(B_TYPE_SCATTERED);
     writes(B_TYPE_PLAIN); writes(B_TYPE_SCATTERED);
     for (i = 0; i < 2; ++i) {

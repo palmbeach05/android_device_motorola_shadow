@@ -26,9 +26,10 @@ def function(text, signature):
 helpers = function((source / 'hboot.c').read_text(),
                    'static void disable_dss(void)')
 helpers += '\n' + function((source / 'emu_uart.c').read_text(),
-                           'void activate_emu_uart(void)')
+                           'int activate_emu_uart(void)')
 preamble = r'''
 #include <assert.h>
+#include <errno.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -56,10 +57,16 @@ static struct {
 static size_t page_size;
 static int found, uart, live, acquired, released, suspend_result;
 static int events[32], event_count;
+static int fail_transaction, transaction_count, warnings;
 enum { LOOKUP = 1, SUSPEND_ENTER, SUSPEND_EXIT, READ, WRITE, MUX, PUT };
 #define KERN_INFO ""
 #define KERN_ALERT ""
-#define printk(...) ((void)0)
+#define KERN_ERR ""
+static void mock_printk(const char *message, ...)
+{
+    if (strstr(message, "WARNING: MiniUSB")) ++warnings;
+}
+#define printk mock_printk
 #define to_platform_driver(p) \
     ((struct platform_driver *)((char *)(p) - offsetof(struct platform_driver, driver)))
 #define to_platform_device(p) \
@@ -107,6 +114,8 @@ static int cpcap_config_for_read(struct spi_device *spi, unsigned short reg,
 {
     assert(live && spi == &devices->spi && reg == 18 && event_count == 1);
     record(READ);
+    ++transaction_count;
+    if (fail_transaction == transaction_count) return -5;
     *value = 0x1234;
     return 0;
 }
@@ -117,7 +126,9 @@ static int cpcap_config_for_write(struct spi_device *spi, unsigned short reg,
     if (event_count == 14) assert(reg == 897 && value == 0x0101);
     else { assert(event_count == 15); assert(reg == 411 && value == 0x014C); }
     record(WRITE);
-    return 0;
+    ++transaction_count;
+    return fail_transaction == transaction_count ?
+           (transaction_count == 2 ? -110 : -121) : 0;
 }
 static void write_omap_mux_register(u16 offset, unsigned char mode,
                                      unsigned char input_en)
@@ -140,9 +151,10 @@ static void write_omap_mux_register(u16 offset, unsigned char mode,
 '''
 tests = r'''
 static void scenario(int is_uart, int lookup, int driver, int callback, int data,
-                     int result)
+                     int result, int spi, int failure)
 {
-    int expected[32], count = 0, i;
+    int expected[32], count = 0, i, status = 0;
+    int before_acquired = acquired, before_released = released;
     assert(!live && acquired == released);
     assert(!mprotect(devices, page_size, PROT_READ | PROT_WRITE));
     memset(devices, 0, sizeof(*devices));
@@ -150,23 +162,35 @@ static void scenario(int is_uart, int lookup, int driver, int callback, int data
     devices->display.dev.driver = driver ? &devices->driver.driver : NULL;
     devices->driver.suspend = callback ? suspend_device : NULL;
     devices->uart.platform_data = data ? &devices->data : NULL;
-    devices->data.spi = &devices->spi;
+    devices->data.spi = spi ? &devices->spi : NULL;
+    fail_transaction = failure; transaction_count = warnings = 0;
     expected[count++] = LOOKUP;
     if (lookup) {
-        if (uart && data) {
+        if (uart && data && spi) {
             expected[count++] = READ;
-            for (i = 0; i < 12; ++i) expected[count++] = MUX;
-            expected[count++] = WRITE;
-            expected[count++] = WRITE;
-            for (i = 0; i < 3; ++i) expected[count++] = MUX;
+            if (failure != 1) {
+                for (i = 0; i < 12; ++i) expected[count++] = MUX;
+                expected[count++] = WRITE;
+                if (failure != 2) {
+                    expected[count++] = WRITE;
+                    if (failure != 3)
+                        for (i = 0; i < 3; ++i) expected[count++] = MUX;
+                }
+            }
         } else if (!uart && driver && callback) {
             expected[count++] = SUSPEND_ENTER;
             expected[count++] = SUSPEND_EXIT;
         }
         expected[count++] = PUT;
     }
-    if (uart) activate_emu_uart();
-    else disable_dss();
+    if (uart) {
+        if (!lookup || !data || !spi) status = -ENODEV;
+        else if (failure) status = failure == 1 ? -5 : failure == 2 ? -110 : -121;
+        assert(activate_emu_uart() == status);
+        assert(warnings == (status == 0));
+    } else disable_dss();
+    assert(acquired - before_acquired == !!lookup);
+    assert(released - before_released == !!lookup);
     assert(!live && acquired == released);
     assert(event_count == count);
     assert(!memcmp(events, expected, count * sizeof(*events)));
@@ -180,16 +204,20 @@ int main(void)
                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     assert(devices != MAP_FAILED);
     for (repeat = 0; repeat < 100; ++repeat) {
-        scenario(0, 0, 0, 0, 0, 0);
-        scenario(0, 1, 0, 0, 0, 0);
-        scenario(0, 1, 1, 0, 0, 0);
-        scenario(0, 1, 1, 1, 0, 0);
-        scenario(0, 1, 1, 1, 0, -5);
-        scenario(1, 0, 0, 0, 0, 0);
-        scenario(1, 1, 0, 0, 0, 0);
-        scenario(1, 1, 0, 0, 1, 0);
+        scenario(0, 0, 0, 0, 0, 0, 0, 0);
+        scenario(0, 1, 0, 0, 0, 0, 0, 0);
+        scenario(0, 1, 1, 0, 0, 0, 0, 0);
+        scenario(0, 1, 1, 1, 0, 0, 0, 0);
+        scenario(0, 1, 1, 1, 0, -5, 0, 0);
+        scenario(1, 0, 0, 0, 0, 0, 0, 0);
+        scenario(1, 1, 0, 0, 0, 0, 1, 0);
+        scenario(1, 1, 0, 0, 1, 0, 0, 0);
+        scenario(1, 1, 0, 0, 1, 0, 1, 1);
+        scenario(1, 1, 0, 0, 1, 0, 1, 2);
+        scenario(1, 1, 0, 0, 1, 0, 1, 3);
+        scenario(1, 1, 0, 0, 1, 0, 1, 0);
     }
-    assert(acquired == 600 && released == 600);
+    assert(acquired == 1000 && released == 1000);
     assert(!munmap(devices, page_size));
     puts("hbootmod preparation device-reference checks passed");
     return 0;
