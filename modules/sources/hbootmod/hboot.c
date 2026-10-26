@@ -53,8 +53,26 @@ static int emu_uart_divisor(int uart_speed, uint16_t *divisor)
 	return 0;
 }
 
+/* Defensive software budget, not a verified hardware timing requirement. */
+#define UART_POLL_TIMEOUT_US 1000000
+#define UART_POLL_DELAY_US 1000
+
+static int uart_wait(uint32_t address, uint32_t mask, uint32_t ready)
+{
+	unsigned int elapsed = 0;
+
+	for (;;) {
+		if ((__raw_readl(address) & mask) == ready)
+			return 0;
+		if (elapsed >= UART_POLL_TIMEOUT_US)
+			return -ETIMEDOUT;
+		udelay(UART_POLL_DELAY_US);
+		elapsed += UART_POLL_DELAY_US;
+	}
+}
+
 /* We have MMU enabled, so pick the virt. address */
-void reconfigure_emu_uart(int uart_speed)
+int reconfigure_emu_uart(int uart_speed)
 {
 	uint32_t lcr;
 	uint32_t efr;
@@ -62,9 +80,12 @@ void reconfigure_emu_uart(int uart_speed)
 	uint32_t ier;
 	uint32_t dlh, dll;
 	uint16_t div;
+	const char characters[] = "hbootmod!\r\n";
+	unsigned int i;
+	int ret;
 
 	if (emu_uart_divisor(uart_speed, &div))
-		return;
+		return -EINVAL;
 
 	printk(KERN_INFO CTRL_DEVNAME ": Enabling clocks for UART3\n");
 	__raw_writel(__raw_readl(MMU_CM_FCLKEN_PER) | 0x0800, MMU_CM_FCLKEN_PER);
@@ -75,8 +96,11 @@ void reconfigure_emu_uart(int uart_speed)
 
 	__raw_writel(__raw_readl(MMU_UART3_BASE + 0x54) | 0x02,
 		     MMU_UART3_BASE + 0x54); //reset uart
-	while (!(__raw_readl(MMU_UART3_BASE + 0x58) & 1))
-		;
+	ret = uart_wait(MMU_UART3_BASE + 0x58, 1, 1);
+	if (ret) {
+		printk(KERN_ERR CTRL_DEVNAME ": UART3 reset timed out\n");
+		return ret;
+	}
 
 	mdr1 = __raw_readl(MMU_UART3_BASE + 0x20);
 	__raw_writel(mdr1 | 0x07, MMU_UART3_BASE + 0x20);
@@ -126,40 +150,18 @@ void reconfigure_emu_uart(int uart_speed)
 	/* Wait for it to be ready */
 	msleep(1);
 
-	/* Test it */
-	__raw_writel('h', MMU_UART3_BASE + 0x00);
-	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
-		;
-	__raw_writel('b', MMU_UART3_BASE + 0x00);
-	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
-		;
-	__raw_writel('o', MMU_UART3_BASE + 0x00);
-	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
-		;
-	__raw_writel('o', MMU_UART3_BASE + 0x00);
-	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
-		;
-	__raw_writel('t', MMU_UART3_BASE + 0x00);
-	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
-		;
-	__raw_writel('m', MMU_UART3_BASE + 0x00);
-	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
-		;
-	__raw_writel('o', MMU_UART3_BASE + 0x00);
-	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
-		;
-	__raw_writel('d', MMU_UART3_BASE + 0x00);
-	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
-		;
-	__raw_writel('!', MMU_UART3_BASE + 0x00);
-	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
-		;
-	__raw_writel('\r', MMU_UART3_BASE + 0x00);
-	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
-		;
-	__raw_writel('\n', MMU_UART3_BASE + 0x00);
-	while ((__raw_readl(MMU_UART3_BASE + 0x44) & 1) != 0)
-		;
+	/* Test it; preserve the existing transmit-status interpretation. */
+	for (i = 0; i < sizeof(characters) - 1; ++i) {
+		__raw_writel(characters[i], MMU_UART3_BASE + 0x00);
+		ret = uart_wait(MMU_UART3_BASE + 0x44, 1, 0);
+		if (ret) {
+			printk(KERN_ERR CTRL_DEVNAME
+			       ": UART3 transmit timed out at character %u (0x%02x)\n",
+			       i, (unsigned int)characters[i]);
+			return ret;
+		}
+	}
+	return 0;
 }
 
 int __attribute__((__naked__)) do_branch(void *bootlist, uint32_t bootsize,
@@ -344,7 +346,11 @@ static int hboot_boot(int handle)
 			free_high_pages((void *)l1_mem, 2);
 			return ret;
 		}
-		reconfigure_emu_uart(emu_uart);
+		ret = reconfigure_emu_uart(emu_uart);
+		if (ret) {
+			free_high_pages((void *)l1_mem, 2);
+			return ret;
+		}
 	}
 
 	/* Disable dss, some defy want it. */
