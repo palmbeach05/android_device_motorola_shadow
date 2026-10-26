@@ -334,7 +334,7 @@ static int hboot_boot(int handle)
 
 	/* UART - if desired */
 	if (emu_uart) {
-		ret = activate_emu_uart();
+		ret = hboot_activate_emu_uart();
 		if (ret) {
 			free_high_pages((void *)l1_mem, 2);
 			return ret;
