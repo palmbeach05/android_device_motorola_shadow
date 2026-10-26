@@ -35,10 +35,11 @@ start = buffers.index('/*\n * The device exposes')
 end = buffers.index('static void init_abstract_buffer', start)
 buffers = buffers[:start] + buffers[end:]
 hboot = (source / 'hboot.c').read_text()
-uart = '\n'.join(re.findall(r'^#define (?:MMU_\w+|UART_CLOCK_BASE_RATE)\s+\w+',
+uart = '\n'.join(re.findall(r'^#define (?:MMU_\w+|UART_CLOCK_BASE_RATE|UART_POLL_\w+)\s+\w+',
                             hboot, re.MULTILINE)) + '\n'
 uart += function(hboot, 'static int emu_uart_divisor(int uart_speed, uint16_t *divisor)')
-uart += '\n' + function(hboot, 'void reconfigure_emu_uart(int uart_speed)')
+uart += '\n' + function(hboot, 'static int uart_wait(uint32_t address, uint32_t mask, uint32_t ready)')
+uart += '\n' + function(hboot, 'int reconfigure_emu_uart(int uart_speed)')
 boot = function(hboot, 'static int hboot_boot(int handle) ')
 # No disabled-interrupt code or assembly is compiled into the harness.
 boot = boot[:boot.index('\t/* Disable preempting */')] + '''
@@ -116,6 +117,15 @@ static int routing_status, display_status;
 struct mmio_event { char operation; uint32_t address, value; };
 static struct mmio_event mmio[128];
 static unsigned int mmio_count;
+/* Repeated busy reads and polling delays use counters, not trace entries. */
+static int poll_stage = -1, slow_stage = -1, test_output;
+static unsigned int ready_after, poll_reads[12], poll_delays, tx_position;
+static void poll_reset(int stage, unsigned int after)
+{
+    poll_stage = -1; slow_stage = stage; ready_after = after; test_output = 0;
+    memset(poll_reads, 0, sizeof(poll_reads));
+    poll_delays = tx_position = mmio_count = 0;
+}
 static void mmio_record(char operation, uint32_t address, uint32_t value)
 {
     assert(mmio_count < sizeof(mmio) / sizeof(mmio[0]));
@@ -125,12 +135,29 @@ static uint32_t __raw_readl(uint32_t address)
 {
     uint32_t value = address == 0xFB020058 ? 1 :
                      address == 0xFB020044 ? 0 : 0x100;
+    if (address == 0xFB020058 || address == 0xFB020044) {
+        unsigned int stage = address == 0xFB020058 ? 0 : tx_position;
+        poll_stage = stage;
+        ++poll_reads[stage];
+        if ((int)stage == slow_stage && poll_reads[stage] <= ready_after)
+            return address == 0xFB020058 ? 0 : 1;
+    }
     mmio_record('r', address, value);
     return value;
 }
 static void __raw_writel(uint32_t value, uint32_t address)
-{ mmio_record('w', address, value); }
-static void msleep(unsigned int duration) { mmio_record('s', 0, duration); }
+{
+    if (address == 0xFB020054) { test_output = 0; tx_position = 0; }
+    if (address == 0xFB020000 && test_output) ++tx_position;
+    mmio_record('w', address, value);
+}
+static void msleep(unsigned int duration)
+{ test_output = 1; tx_position = 0; mmio_record('s', 0, duration); }
+static void udelay(unsigned int duration)
+{
+    assert(duration == 1000 && poll_stage >= 0);
+    ++poll_delays;
+}
 static uint32_t get_high_mem(size_t size)
 {
     void *p = calloc(1, size);
@@ -143,7 +170,7 @@ static uint32_t get_high_pages(unsigned int order)
 {
     void *p;
     ++allocations;
-    mmio_count = 0;
+    poll_reset(slow_stage, ready_after);
     checkpoint(2);
     if (fail_pages) return 0;
     assert(!posix_memalign(&p, 16384, PAGE_SIZE << order));
@@ -277,8 +304,8 @@ static void uart_programming(int rate, uint16_t divisor)
     const char characters[] = "hbootmod!\r\n";
     uint16_t checked = 0;
     assert(!emu_uart_divisor(rate, &checked) && checked == divisor);
-    mmio_count = 0;
-    reconfigure_emu_uart(rate);
+    poll_reset(-1, 0);
+    assert(!reconfigure_emu_uart(rate));
     count = mmio_count;
     memcpy(actual, mmio, sizeof(actual));
     mmio_count = 0;
@@ -334,7 +361,7 @@ static void uart_rates(void)
         struct abstract_buffer before = *buffers.bufs[1].container.abstract;
         emu_uart = invalid[i];
         allocations = routing = display = transitions = mmio_count = 0;
-        reconfigure_emu_uart(emu_uart);
+        assert(reconfigure_emu_uart(emu_uart) == -EINVAL);
         assert(!mmio_count);
         assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EINVAL);
         assert(!allocations && !routing && !display && !transitions && !mmio_count);
@@ -343,7 +370,7 @@ static void uart_rates(void)
         pthread_mutex_unlock(&hbootctrl_mutex);
     }
     mmio_count = 0;
-    reconfigure_emu_uart(0);
+    assert(reconfigure_emu_uart(0) == -EINVAL);
     assert(!mmio_count);
     emu_uart = 0;
     assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EBUSY);
@@ -358,6 +385,76 @@ static void uart_rates(void)
         assert(mmio_count);
     }
     emu_uart = 115200;
+}
+/* Poll the production helper at every reset/transmit stage. Busy observations
+ * are counted separately so the successful-path trace stays small and useful. */
+static void uart_polling(void)
+{
+    struct mmio_event successful[128];
+    unsigned int stage, i, delays, budget;
+    unsigned int successful_count;
+    reset();
+    assert(alloc(B_TYPE_PLAIN, 8, 0) == 0);
+    emu_uart = 115200;
+    kill_dss = 1;
+    poll_reset(-1, 0);
+    assert(!reconfigure_emu_uart(emu_uart));
+    successful_count = mmio_count;
+    memcpy(successful, mmio, sizeof(successful));
+    assert(!poll_delays);
+    budget = UART_POLL_TIMEOUT_US / UART_POLL_DELAY_US;
+    assert(budget && budget * UART_POLL_DELAY_US == UART_POLL_TIMEOUT_US);
+    for (stage = 0; stage < 12; ++stage) {
+        /* Both ordinary delayed readiness and the final allowed observation. */
+        for (delays = 2; ; delays = budget) {
+            poll_reset(stage, delays);
+            assert(!reconfigure_emu_uart(emu_uart));
+            assert(poll_reads[stage] == delays + 1 && poll_delays == delays);
+            assert(mmio_count == successful_count);
+            for (i = 0; i < mmio_count; ++i) {
+                assert(mmio[i].operation == successful[i].operation);
+                assert(mmio[i].address == successful[i].address);
+                assert(mmio[i].value == successful[i].value);
+            }
+            if (delays == budget) break;
+        }
+        {
+            unsigned int allocated = page_allocations, freed = page_frees;
+            unsigned int prefix = stage ? 26 + 2 * (stage - 1) + 1 : 6;
+            poll_reset(stage, UINT_MAX);
+            allocations = routing = display = transitions = 0;
+            assert(ioctl_op(&first, HBOOT_BOOT, 0) == -ETIMEDOUT);
+            assert(page_allocations == allocated + 1 && page_frees == freed + 1);
+            assert(page_allocations == page_frees);
+            assert(allocations == 1 && routing == 1 && !display && !transitions);
+            assert(poll_reads[stage] == budget + 1 && poll_delays == budget);
+            for (i = 0; i < stage; ++i) assert(poll_reads[i] == 1);
+            for (i = stage + 1; i < 12; ++i) assert(!poll_reads[i]);
+            /* Exact prefix: no later writes, characters or preparation. */
+            assert(mmio_count == prefix);
+            for (i = 0; i < prefix; ++i) {
+                assert(mmio[i].operation == successful[i].operation);
+                assert(mmio[i].address == successful[i].address);
+                assert(mmio[i].value == successful[i].value);
+            }
+            assert(!pthread_mutex_trylock(&hbootctrl_mutex));
+            pthread_mutex_unlock(&hbootctrl_mutex);
+            assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, 0));
+        }
+    }
+    /* Disabled preparation bypasses even a stuck reset condition. */
+    emu_uart = 0;
+    poll_reset(0, UINT_MAX);
+    routing = display = transitions = 0;
+    assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EBUSY);
+    assert(!routing && display == 1 && transitions == 1 && !mmio_count);
+    assert(!poll_delays);
+    for (i = 0; i < 12; ++i) assert(!poll_reads[i]);
+    /* Later mock success demonstrates control flow only, not hardware recovery. */
+    poll_reset(-1, 0);
+    emu_uart = 115200;
+    assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EBUSY);
+    assert(page_allocations == page_frees);
 }
 /* Mocked later success exercises control flow only; it is not hardware recovery. */
 static void uart_routing_errors(void)
@@ -790,6 +887,7 @@ int main(void)
     assert(sizeof(void *) == 4);
     assert(!buffers_init());
     uart_rates();
+    uart_polling();
     uart_routing_errors();
     display_errors();
     selection(B_TYPE_PLAIN); selection(B_TYPE_SCATTERED);
