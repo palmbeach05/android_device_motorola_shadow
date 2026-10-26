@@ -311,6 +311,12 @@ static int hboot_boot(int handle)
 	if (emu_uart && emu_uart_divisor(emu_uart, &uart_divisor))
 		return -EINVAL;
 
+	boot_entry = get_bootentry(&bootsize, handle);
+	if (boot_entry == NULL) {
+		printk(KERN_ERR CTRL_DEVNAME ": Failed to get boot entry\n");
+		return -EINVAL;
+	}
+
 	l1_mem = get_high_pages(2);
 	if (l1_mem == 0) {
 		printk(KERN_INFO CTRL_DEVNAME ": Failed to allocate new l1 table\n");
@@ -324,13 +330,6 @@ static int hboot_boot(int handle)
 		l1_table = (uint32_t *)l1_mem;
 
 	build_l1_table(l1_table);
-
-	boot_entry = get_bootentry(&bootsize, handle);
-	if (boot_entry == NULL) {
-		printk(KERN_ERR CTRL_DEVNAME ": Failed to get boot entry\n");
-		free_high_pages((void *)l1_mem, 2);
-		return -EINVAL;
-	}
 
 	bootlist = get_bootlist(&listsize, handle);
 	if (bootlist == NULL) {
