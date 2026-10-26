@@ -19,6 +19,7 @@ preamble = r'''
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 typedef unsigned long uint32_t;
 #define PAGE_SIZE 4096UL
 #define GFP_KERNEL 0
@@ -64,6 +65,7 @@ static void *kmalloc(size_t size, int flags)
         if (fail_bookkeeping) return NULL;
         bookkeeping = malloc(size);
         assert(bookkeeping);
+        memset(bookkeeping, 0xa5, size);
         return bookkeeping;
     }
     return (void *)allocate(0, get_order(size));

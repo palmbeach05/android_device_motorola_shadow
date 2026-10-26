@@ -215,6 +215,7 @@ static void init_abstract_buffer(struct abstract_buffer *ab, uint8_t tag, uint8_
 	ab->type = type;
 	ab->attrs = attrs;
 	ab->size = size;
+	ab->checksum = 0;
 
 #ifdef HBOOT_VERIFY_CRC32
 	if (attrs & B_ATTR_VERIFY)
@@ -253,6 +254,7 @@ static struct scattered_buffer *allocate_scattered_buffer(uint32_t bufsize, uint
 		if (p == 0)
 			goto err;
 
+		memset((void*)p, 0, CHUNK_SIZE);
 		sc->chunks[sc->allocated_chunks++] = p;
 		if (bufsize < sc->chunk_size)
 			bufsize = 0;
@@ -315,6 +317,7 @@ static struct plain_buffer *allocate_plain_buffer(uint32_t bufsize, uint32_t res
 		return NULL;
 	}
 
+	memset(pb->data, 0, bufsize);
 	return pb;
 }
 
