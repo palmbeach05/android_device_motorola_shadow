@@ -112,7 +112,7 @@ static size_t copy_from_user(void *to, const void *from, size_t size)
 static int fail_pages, misalign_pages, fail_list, emu_uart = 115200, kill_dss = 1;
 static unsigned int allocations, routing, display, transitions;
 static unsigned int page_allocations, page_frees;
-static int routing_status;
+static int routing_status, display_status;
 struct mmio_event { char operation; uint32_t address, value; };
 static struct mmio_event mmio[128];
 static unsigned int mmio_count;
@@ -154,12 +154,17 @@ static uint32_t get_high_pages(unsigned int order)
 static void free_high_pages(void *p, unsigned int order) { (void)order; ++page_frees; free((char *)p - (misalign_pages ? 4 : 0)); }
 static void build_l1_table(uint32_t *table) { (void)table; }
 static pthread_mutex_t hbootctrl_mutex;
-static int activate_emu_uart(void)
+static int hboot_activate_emu_uart(void)
 {
     assert(pthread_mutex_trylock(&hbootctrl_mutex) == EBUSY);
     ++routing; checkpoint(5); return routing_status;
 }
-static void disable_dss(void) { ++display; checkpoint(6); }
+static int disable_dss(void)
+{
+    assert(pthread_mutex_trylock(&hbootctrl_mutex) == EBUSY);
+    assert(!emu_uart || (routing && !routing_status && mmio_count));
+    ++display; checkpoint(6); return display_status;
+}
 '''
 # Headers supply the real ABI and declarations; allocator mocks above are static.
 header = without_includes((source / 'buffers.h').read_text())
@@ -185,6 +190,8 @@ static int verify_reuse, reuse_boot_handle;
 static void *reuse_snapshot[MAX_BUFFERS_COUNT];
 static void mock_transition(void *list, uint32_t count, bootfunc_t entry)
 {
+    assert(!emu_uart || (routing && !routing_status && mmio_count));
+    assert(!kill_dss || (display && !display_status));
     ++transitions;
     checkpoint(7);
     assert(entry && list);
@@ -384,6 +391,46 @@ static void uart_routing_errors(void)
     assert(allocations == 1 && !routing && display == 1 && transitions == 1);
     assert(!mmio_count && page_allocations == page_frees);
     routing_status = 0;
+    emu_uart = 115200;
+}
+/* A later successful mock call covers control flow, not hardware recovery. */
+static void display_errors(void)
+{
+    const int errors[] = { -ENODEV, -EOPNOTSUPP, -EIO, -ETIMEDOUT };
+    unsigned int i;
+    int uart_enabled;
+    reset();
+    assert(alloc(B_TYPE_PLAIN, 8, 0) == 0);
+    routing_status = 0;
+    kill_dss = 1;
+    for (uart_enabled = 0; uart_enabled <= 1; ++uart_enabled) {
+        emu_uart = uart_enabled ? 115200 : 0;
+        for (i = 0; i < sizeof(errors) / sizeof(errors[0]); ++i) {
+            unsigned int allocated = page_allocations, freed = page_frees;
+            allocations = routing = display = transitions = mmio_count = 0;
+            display_status = errors[i];
+            assert(ioctl_op(&first, HBOOT_BOOT, 0) == errors[i]);
+            assert(page_allocations == allocated + 1 && page_frees == freed + 1);
+            assert(page_allocations == page_frees);
+            assert(allocations == 1 && routing == (unsigned int)uart_enabled);
+            assert(display == 1 && !transitions);
+            assert(!!mmio_count == uart_enabled);
+            assert(!pthread_mutex_trylock(&hbootctrl_mutex));
+            pthread_mutex_unlock(&hbootctrl_mutex);
+        }
+        /* Disabled display preparation must not consult a failing mock. */
+        kill_dss = 0;
+        allocations = routing = display = transitions = mmio_count = 0;
+        assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EBUSY);
+        assert(allocations == 1 && routing == (unsigned int)uart_enabled);
+        assert(!display && transitions == 1 && page_allocations == page_frees);
+        kill_dss = 1;
+        display_status = 0;
+        allocations = routing = display = transitions = mmio_count = 0;
+        assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EBUSY);
+        assert(allocations == 1 && routing == (unsigned int)uart_enabled);
+        assert(display == 1 && transitions == 1 && page_allocations == page_frees);
+    }
     emu_uart = 115200;
 }
 static void snapshot_payload(int handle, char *data, size_t size)
@@ -744,6 +791,7 @@ int main(void)
     assert(!buffers_init());
     uart_rates();
     uart_routing_errors();
+    display_errors();
     selection(B_TYPE_PLAIN); selection(B_TYPE_SCATTERED);
     writes(B_TYPE_PLAIN); writes(B_TYPE_SCATTERED);
     for (i = 0; i < 2; ++i) {
