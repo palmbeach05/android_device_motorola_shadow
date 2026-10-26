@@ -54,8 +54,8 @@ static int emu_uart_divisor(int uart_speed, uint16_t *divisor)
 }
 
 /* Defensive software budget, not a verified hardware timing requirement. */
-#define UART_POLL_TIMEOUT_US 1000000
-#define UART_POLL_DELAY_US 1000
+#define UART_POLL_TIMEOUT_US	1000000
+#define UART_POLL_DELAY_US		1000
 
 static int uart_wait(uint32_t address, uint32_t mask, uint32_t ready)
 {
