@@ -48,6 +48,8 @@
 #include <plat/hardware.h>
 #include <plat/omap34xx.h>
 
+#include "emu_uart.h"
+
 /*
  * Register definitions for CPCAP related SPI register
  */
@@ -271,7 +273,7 @@ static int find_device(struct device *dev, void *data)
 	return 0;
 }
 
-int activate_emu_uart(void)
+int hboot_activate_emu_uart(void)
 {
 	int i;
 	int ret = -ENODEV;
