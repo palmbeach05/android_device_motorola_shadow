@@ -113,6 +113,8 @@ static size_t copy_from_user(void *to, const void *from, size_t size)
 static int fail_pages, misalign_pages, fail_list, emu_uart = 115200, kill_dss = 1;
 static unsigned int allocations, routing, display, transitions;
 static unsigned int page_allocations, page_frees;
+static unsigned int mem_allocations, mem_frees;
+static int fail_mem_after = -1, fail_chunk_after = -1;
 static int routing_status, display_status;
 struct mmio_event { char operation; uint32_t address, value; };
 static struct mmio_event mmio[128];
@@ -160,12 +162,17 @@ static void udelay(unsigned int duration)
 }
 static uint32_t get_high_mem(size_t size)
 {
-    void *p = calloc(1, size);
+    void *p;
     ++allocations;
+    if (fail_mem_after == 0) return 0;
+    if (fail_mem_after > 0) --fail_mem_after;
+    p = malloc(size);
     assert(p);
+    ++mem_allocations;
+    memset(p, 0xa5, size);
     return (uint32_t)p;
 }
-static void free_high_mem(void *p) { free(p); }
+static void free_high_mem(void *p) { if (p) ++mem_frees; free(p); }
 static uint32_t get_high_pages(unsigned int order)
 {
     void *p;
@@ -173,9 +180,11 @@ static uint32_t get_high_pages(unsigned int order)
     poll_reset(slow_stage, ready_after);
     checkpoint(2);
     if (fail_pages) return 0;
+    if (fail_chunk_after == 0) return 0;
+    if (fail_chunk_after > 0) --fail_chunk_after;
     assert(!posix_memalign(&p, 16384, PAGE_SIZE << order));
     ++page_allocations;
-    memset(p, 0, PAGE_SIZE << order);
+    memset(p, 0xa5, PAGE_SIZE << order);
     return (uint32_t)p + (misalign_pages ? 4 : 0);
 }
 static void free_high_pages(void *p, unsigned int order) { (void)order; ++page_frees; free((char *)p - (misalign_pages ? 4 : 0)); }
@@ -750,6 +759,94 @@ static void crc_lifecycle(int type, int attrs)
     }
 }
 
+static void initialized_checksum(struct abstract_buffer *a, int attrs)
+{
+    uint32_t expected = 0;
+#ifdef HBOOT_VERIFY_CRC32
+    if (attrs & B_ATTR_VERIFY) crc32_init_ctx(&expected);
+#endif
+    assert(a->checksum == expected);
+}
+static void initialization(int type, int attrs)
+{
+    const int sizes[] = { 1, CHUNK_SIZE - 1, CHUNK_SIZE, CHUNK_SIZE + 1,
+                          2 * CHUNK_SIZE + 17 };
+    char expected[9000], actual[9000], dirty[9000];
+    unsigned int i;
+    memset(dirty, 0x6b, sizeof(dirty));
+    for (i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
+        int size = sizes[i], h;
+        reset();
+        assert(alloc(B_TYPE_PLAIN, 8, 0) == 0);
+        h = alloc(type, size, B_ATTR_VERIFY);
+        assert(h == 1);
+        initialized_checksum(buffers.bufs[h].container.abstract, B_ATTR_VERIFY);
+        memset(expected, 0, size);
+        snapshot_payload(h, actual, size);
+        assert(!memcmp(actual, expected, size));
+        /* Dirty the old payload and checksum before reusing its slot with
+         * either verification setting. Allocator poison also covers fresh RAM. */
+        assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, h));
+        assert(hbootctrl_write(&first, dirty, size, &first.f_pos) == size);
+        buffers.bufs[h].container.abstract->checksum = 0x12345678;
+        assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, h));
+        for (int reuse = 0; reuse < 2; ++reuse) {
+            assert(alloc(type, size, attrs) == h);
+            initialized_checksum(buffers.bufs[h].container.abstract, attrs);
+            memset(expected, 0, size);
+            snapshot_payload(h, actual, size);
+            assert(!memcmp(actual, expected, size));
+            prepare_crc(h, expected, size, attrs);
+            assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, h));
+            first.f_pos = size / 2;
+            assert(hbootctrl_write(&first, "xyz", 1, &first.f_pos) == 1);
+            expected[size / 2] = 'x';
+            assert(first.f_pos == size / 2 + 1);
+            prepare_crc(h, expected, size, attrs);
+            /* Reselection and repeated preparation must retain the write. */
+            assert(!ioctl_op(&second, HBOOT_SELECT_BUFFER, h));
+            prepare_crc(h, expected, size, attrs);
+            assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, h));
+        }
+    }
+}
+static void initialization_failures(void)
+{
+    unsigned int mem_live, pages_live;
+    reset();
+    mem_live = mem_allocations - mem_frees;
+    pages_live = page_allocations - page_frees;
+    for (int type = B_TYPE_PLAIN; type <= B_TYPE_SCATTERED; ++type) {
+        for (int failure = 0; failure < (type == B_TYPE_PLAIN ? 2 : 1); ++failure) {
+            fail_mem_after = failure;
+            assert(alloc(type, CHUNK_SIZE + 17, 0) == INVALID_BUFFER_HANDLE);
+            fail_mem_after = -1;
+            assert(mem_allocations - mem_frees == mem_live);
+            assert(page_allocations - page_frees == pages_live);
+        }
+    }
+    for (int failure = 0; failure < 3; ++failure) {
+        fail_chunk_after = failure;
+        assert(alloc(B_TYPE_SCATTERED, 2 * CHUNK_SIZE + 17, 0) == INVALID_BUFFER_HANDLE);
+        fail_chunk_after = -1;
+        assert(mem_allocations - mem_frees == mem_live);
+        assert(page_allocations - page_frees == pages_live);
+    }
+    /* NAND retains its empty-stream CRC and has no payload to initialize. */
+    for (int attrs = 0; attrs <= B_ATTR_VERIFY; ++attrs) {
+        int h = alloc(B_TYPE_NAND, 123, attrs);
+        uint32_t count, checksum = 0;
+        assert(h >= 0);
+        initialized_checksum(buffers.bufs[h].container.abstract, attrs);
+        mutex_lock(&hbootctrl_mutex);
+        get_bootlist(&count, INVALID_BUFFER_HANDLE);
+        mutex_unlock(&hbootctrl_mutex);
+        assert(count == 1);
+        assert(buffers.bufs[h].container.abstract->checksum == checksum);
+        assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, h));
+    }
+}
+
 struct job { unsigned int cmd; unsigned long arg; int write, result; };
 static void *worker(void *arg)
 {
@@ -893,9 +990,12 @@ int main(void)
     selection(B_TYPE_PLAIN); selection(B_TYPE_SCATTERED);
     writes(B_TYPE_PLAIN); writes(B_TYPE_SCATTERED);
     for (i = 0; i < 2; ++i) {
+        initialization(B_TYPE_PLAIN, i ? B_ATTR_VERIFY : 0);
+        initialization(B_TYPE_SCATTERED, i ? B_ATTR_VERIFY : 0);
         crc_lifecycle(B_TYPE_PLAIN, i ? B_ATTR_VERIFY : 0);
         crc_lifecycle(B_TYPE_SCATTERED, i ? B_ATTR_VERIFY : 0);
     }
+    initialization_failures();
     slot_reuse();
     reset();
     assert(ioctl_op(&first, HBOOT_FREE_BUFFER, -1) == -1);
