@@ -24,9 +24,9 @@ def function(text, signature):
 
 
 helpers = function((source / 'hboot.c').read_text(),
-                   'static void disable_dss(void)')
+                   'static int disable_dss(void)')
 helpers += '\n' + function((source / 'emu_uart.c').read_text(),
-                           'int activate_emu_uart(void)')
+                           'int hboot_activate_emu_uart(void)')
 preamble = r'''
 #include <assert.h>
 #include <errno.h>
@@ -62,6 +62,7 @@ enum { LOOKUP = 1, SUSPEND_ENTER, SUSPEND_EXIT, READ, WRITE, MUX, PUT };
 #define KERN_INFO ""
 #define KERN_ALERT ""
 #define KERN_ERR ""
+#define CTRL_DEVNAME "hbootctrl"
 static void mock_printk(const char *message, ...)
 {
     if (strstr(message, "WARNING: MiniUSB")) ++warnings;
@@ -186,9 +187,14 @@ static void scenario(int is_uart, int lookup, int driver, int callback, int data
     if (uart) {
         if (!lookup || !data || !spi) status = -ENODEV;
         else if (failure) status = failure == 1 ? -5 : failure == 2 ? -110 : -121;
-        assert(activate_emu_uart() == status);
+        assert(hboot_activate_emu_uart() == status);
         assert(warnings == (status == 0));
-    } else disable_dss();
+    } else {
+        if (!lookup || !driver) status = -ENODEV;
+        else if (!callback) status = -EOPNOTSUPP;
+        else status = result;
+        assert(disable_dss() == status);
+    }
     assert(acquired - before_acquired == !!lookup);
     assert(released - before_released == !!lookup);
     assert(!live && acquired == released);
@@ -209,6 +215,7 @@ int main(void)
         scenario(0, 1, 1, 0, 0, 0, 0, 0);
         scenario(0, 1, 1, 1, 0, 0, 0, 0);
         scenario(0, 1, 1, 1, 0, -5, 0, 0);
+        scenario(0, 1, 1, 1, 0, -ETIMEDOUT, 0, 0);
         scenario(1, 0, 0, 0, 0, 0, 0, 0);
         scenario(1, 1, 0, 0, 0, 0, 1, 0);
         scenario(1, 1, 0, 0, 1, 0, 0, 0);
@@ -217,7 +224,7 @@ int main(void)
         scenario(1, 1, 0, 0, 1, 0, 1, 3);
         scenario(1, 1, 0, 0, 1, 0, 1, 0);
     }
-    assert(acquired == 1000 && released == 1000);
+    assert(acquired == 1100 && released == 1100);
     assert(!munmap(devices, page_size));
     puts("hbootmod preparation device-reference checks passed");
     return 0;

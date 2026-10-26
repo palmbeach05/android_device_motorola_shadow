@@ -257,8 +257,9 @@ module_param(kill_dss, int, 0);
 static int find_my_dev(struct device *dev, void *data);
 #define to_platform_driver(x) container_of((x), struct platform_driver, driver)
 
-static void disable_dss(void)
+static int disable_dss(void)
 {
+	int ret = -ENODEV;
 	struct device *dev;
 	struct platform_device *plat_dev;
 	struct device_driver *drv;
@@ -268,7 +269,7 @@ static void disable_dss(void)
 	dev = device_find_child(&platform_bus, "omapdss", find_my_dev);
 	if (!dev) {
 		printk("Could not find omapdss device\n");
-		return;
+		return -ENODEV;
 	}
 	drv = dev->driver;
 	if (!drv) {
@@ -281,13 +282,17 @@ static void disable_dss(void)
 
 	if (!plat_drv->suspend) {
 		printk("Could not find suspend in omapdss driver\n");
+		ret = -EOPNOTSUPP;
 		goto out_put_device;
 	}
 	pt.event = 0;
-	plat_drv->suspend(plat_dev, pt);
+	ret = plat_drv->suspend(plat_dev, pt);
+	if (ret)
+		printk(KERN_ERR CTRL_DEVNAME ": omapdss suspend failed: %d\n", ret);
 
 out_put_device:
 	put_device(dev);
+	return ret;
 }
 
 /* Caller holds hbootctrl_mutex through preparation and the transition. */
@@ -343,8 +348,13 @@ static int hboot_boot(int handle)
 	}
 
 	/* Disable dss, some defy want it. */
-	if (kill_dss)
-		disable_dss();
+	if (kill_dss) {
+		ret = disable_dss();
+		if (ret) {
+			free_high_pages((void *)l1_mem, 2);
+			return ret;
+		}
+	}
 
 	/* Disable preempting */
 	preempt_disable();
