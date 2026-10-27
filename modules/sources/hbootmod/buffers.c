@@ -304,6 +304,9 @@ static struct plain_buffer *allocate_plain_buffer(uint32_t bufsize, uint32_t res
 {
 	struct plain_buffer *pb;
 
+	if (bufsize == 0)
+		return NULL;
+
 	pb = (struct plain_buffer*)get_high_mem(sizeof(struct plain_buffer));
 
 	if (pb == NULL)
