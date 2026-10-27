@@ -100,9 +100,11 @@ static void checkpoint(int stage)
     pthread_mutex_unlock(&monitor);
 }
 static size_t copy_budget = (size_t)-1;
+static unsigned int user_copy_calls;
 static size_t copy_from_user(void *to, const void *from, size_t size)
 {
     size_t copied = min(copy_budget, size);
+    ++user_copy_calls;
     checkpoint(1);
     memcpy(to, from, copied);
     /* ARM copy_from_user() zero-pads the uncopied destination tail. */
@@ -555,6 +557,176 @@ static void snapshot_payload(int handle, char *data, size_t size)
                    min(size - offset, (size_t)sc->chunk_size));
     }
 }
+
+/* Small fixtures for operations that must have no observable side effects. */
+struct edge_snapshot {
+    struct buffers_ctx context;
+    unsigned char metadata[MAX_BUFFERS_COUNT][sizeof(struct scattered_buffer) +
+                                               2 * sizeof(uint32_t)];
+    size_t metadata_size[MAX_BUFFERS_COUNT];
+    char payload[MAX_BUFFERS_COUNT][CHUNK_SIZE + 17];
+    uint32_t bootlist[MAX_BUFFERS_COUNT];
+    loff_t first_pos, second_pos;
+    unsigned int counters[14], reads[12];
+    size_t budget;
+};
+static void edge_counters(unsigned int *values)
+{
+    const unsigned int current[] = {
+        mem_attempts, page_attempts, mem_allocations, page_allocations,
+        mem_frees, page_frees, allocations, routing, display, transitions,
+        l1_builds, mmio_count, poll_delays, user_copy_calls
+    };
+    memcpy(values, current, sizeof(current));
+}
+static void capture_edge(struct edge_snapshot *snapshot)
+{
+    int i;
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->context = buffers;
+    snapshot->first_pos = first.f_pos; snapshot->second_pos = second.f_pos;
+    snapshot->budget = copy_budget;
+    memcpy(snapshot->bootlist, buffers.bootlist, sizeof(snapshot->bootlist));
+    edge_counters(snapshot->counters);
+    memcpy(snapshot->reads, poll_reads, sizeof(snapshot->reads));
+    for (i = 0; i < buffers.used; ++i) {
+        struct generic_buffer *buf = &buffers.bufs[i];
+        size_t bytes;
+        if (!buf->container.generic) continue;
+        switch (BUFFER_TYPE(buf->container.abstract)) {
+        case B_TYPE_PLAIN: bytes = sizeof(struct plain_buffer); break;
+        case B_TYPE_SCATTERED:
+            bytes = sizeof(struct scattered_buffer) +
+                    buf->container.scattered->allocated_chunks * sizeof(uint32_t);
+            break;
+        case B_TYPE_NAND: bytes = sizeof(struct nand_buffer); break;
+        default: assert(0); return;
+        }
+        assert(bytes <= sizeof(snapshot->metadata[i]));
+        snapshot->metadata_size[i] = bytes;
+        memcpy(snapshot->metadata[i], buf->container.generic, bytes);
+        if (BUFFER_TYPE(buf->container.abstract) != B_TYPE_NAND) {
+            assert(BUFFER_SIZE(buf->container.abstract) <= sizeof(snapshot->payload[i]));
+            snapshot_payload(i, snapshot->payload[i], BUFFER_SIZE(buf->container.abstract));
+        }
+    }
+}
+static void unchanged_edge(const struct edge_snapshot *snapshot)
+{
+    struct edge_snapshot after;
+    capture_edge(&after);
+    assert(!memcmp(&snapshot->context, &after.context, sizeof(after.context)));
+    assert(!memcmp(snapshot->metadata, after.metadata, sizeof(after.metadata)));
+    assert(!memcmp(snapshot->metadata_size, after.metadata_size, sizeof(after.metadata_size)));
+    assert(!memcmp(snapshot->payload, after.payload, sizeof(after.payload)));
+    assert(!memcmp(snapshot->bootlist, after.bootlist, sizeof(after.bootlist)));
+    assert(snapshot->first_pos == after.first_pos && snapshot->second_pos == after.second_pos);
+    assert(snapshot->budget == after.budget);
+    assert(!memcmp(snapshot->counters, after.counters, sizeof(after.counters)));
+    assert(!memcmp(snapshot->reads, after.reads, sizeof(after.reads)));
+    assert(!pthread_mutex_trylock(&hbootctrl_mutex));
+    pthread_mutex_unlock(&hbootctrl_mutex);
+}
+static void edge_fixtures(void)
+{
+    char data[CHUNK_SIZE + 17];
+    int h;
+    reset();
+    assert(alloc(B_TYPE_PLAIN, sizeof(data), B_ATTR_VERIFY) == 0);
+    assert(alloc(B_TYPE_SCATTERED, sizeof(data), B_ATTR_VERIFY) == 1);
+    assert(alloc(B_TYPE_NAND, sizeof(data), B_ATTR_VERIFY) == 2);
+    memset(data, 0x6b, sizeof(data));
+    for (h = 0; h < 2; ++h) {
+        assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, h));
+        assert(hbootctrl_write(&first, data, sizeof(data), &first.f_pos) == sizeof(data));
+        check_published(h);
+    }
+    memset(buffers.bootlist, 0x5a, MAX_BUFFERS_COUNT * sizeof(uint32_t));
+    first.f_pos = 3; second.f_pos = 7;
+}
+static void invalid_releases(void)
+{
+    struct edge_snapshot before;
+    int handles[] = { -1, INT_MIN, MAX_BUFFERS_COUNT, INT_MAX, 4, 3 };
+    int caller, direct;
+    size_t i;
+    edge_fixtures();
+    assert(alloc(B_TYPE_PLAIN, 8, 0) == 3);
+    assert(!ioctl_op(&second, HBOOT_FREE_BUFFER, 3));
+    /* Slot 3 was freed; slot 4 was never allocated. Keep a live selection. */
+    assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, 1));
+    first.f_pos = 3; second.f_pos = 7;
+    for (direct = 0; direct < 2; ++direct)
+        for (caller = 0; caller < 2; ++caller)
+            for (i = 0; i < sizeof(handles) / sizeof(handles[0]); ++i) {
+                capture_edge(&before);
+                if (direct) {
+                    mutex_lock(&hbootctrl_mutex);
+                    assert(free_buffer(handles[i]) == -EINVAL);
+                    mutex_unlock(&hbootctrl_mutex);
+                } else {
+                    assert(ioctl_op(caller ? &second : &first, HBOOT_FREE_BUFFER,
+                                    (unsigned long)handles[i]) == -EINVAL);
+                }
+                unchanged_edge(&before);
+            }
+    /* Valid release still clears selection; both the last slot and hole reuse work. */
+    assert(!ioctl_op(&second, HBOOT_FREE_BUFFER, 1));
+    assert(buffers.handle == INVALID_BUFFER_HANDLE);
+    assert(first.f_pos == 3 && second.f_pos == 7);
+    assert(alloc(B_TYPE_PLAIN, 8, 0) == 3);
+    assert(alloc(B_TYPE_SCATTERED, CHUNK_SIZE + 17, B_ATTR_VERIFY) == 1);
+    assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, 1));
+    assert(hbootctrl_write(&first, "x", 1, &first.f_pos) == 1);
+}
+static void edge_write(struct file *file, size_t size, int expected)
+{
+    struct edge_snapshot before;
+    capture_edge(&before);
+    /* NULL is deliberate: a valid zero-length request must never copy. */
+    assert(hbootctrl_write(file, NULL, size, &file->f_pos) == expected);
+    unchanged_edge(&before);
+}
+static void zero_length_writes(void)
+{
+    const loff_t positions[] = { 0, 7, CHUNK_SIZE + 17, -1, CHUNK_SIZE + 18 };
+    int h, caller, selection_state;
+    size_t i;
+    edge_fixtures();
+    for (h = 0; h < 2; ++h) {
+        assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, h));
+        for (caller = 0; caller < 2; ++caller) {
+            struct file *file = caller ? &second : &first;
+            for (i = 0; i < sizeof(positions) / sizeof(positions[0]); ++i) {
+                first.f_pos = 3; second.f_pos = 5;
+                file->f_pos = positions[i];
+                edge_write(file, 0, i < 3 ? 0 : -EINVAL);
+            }
+            file->f_pos = CHUNK_SIZE + 17;
+            edge_write(file, 1, -EINVAL);
+        }
+    }
+    /* Reject absent, freed and NAND selections before zero-length handling. */
+    for (selection_state = 0; selection_state < 3; ++selection_state) {
+        if (selection_state == 0) {
+            mutex_lock(&hbootctrl_mutex);
+            buffers.handle = INVALID_BUFFER_HANDLE;
+            mutex_unlock(&hbootctrl_mutex);
+        } else if (selection_state == 1) {
+            assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, 0));
+            assert(!ioctl_op(&second, HBOOT_FREE_BUFFER, 0));
+            assert(buffers.handle == INVALID_BUFFER_HANDLE);
+        } else assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, 2));
+        for (caller = 0; caller < 2; ++caller)
+            for (i = 0; i < sizeof(positions) / sizeof(positions[0]); ++i) {
+                struct file *file = caller ? &second : &first;
+                first.f_pos = 3; second.f_pos = 5;
+                file->f_pos = positions[i];
+                edge_write(file, 0, -EINVAL);
+            }
+    }
+}
+
 /* Rejected writes must leave payload, CRC/state and both file positions intact. */
 static void rejected_writes(int handle)
 {
@@ -728,10 +900,10 @@ static void selection(int type)
     assert(ioctl_op(&second, HBOOT_SELECT_BUFFER, unrelated) == -EINVAL);
     assert(first.f_pos == sizeof(payload) && second.f_pos == 7);
     assert(buffers.handle == h);
-    assert(ioctl_op(&second, HBOOT_FREE_BUFFER, unrelated) == -1);
-    assert(ioctl_op(&second, HBOOT_FREE_BUFFER, -1) == -1);
-    assert(ioctl_op(&second, HBOOT_FREE_BUFFER, buffers.used) == -1);
-    assert(ioctl_op(&second, HBOOT_FREE_BUFFER, MAX_BUFFERS_COUNT) == -1);
+    assert(ioctl_op(&second, HBOOT_FREE_BUFFER, unrelated) == -EINVAL);
+    assert(ioctl_op(&second, HBOOT_FREE_BUFFER, -1) == -EINVAL);
+    assert(ioctl_op(&second, HBOOT_FREE_BUFFER, buffers.used) == -EINVAL);
+    assert(ioctl_op(&second, HBOOT_FREE_BUFFER, MAX_BUFFERS_COUNT) == -EINVAL);
     assert(buffers.handle == h);
     /* Failed selections/frees preserve usable global selection. */
     assert(hbootctrl_write(&second, "abcdefgh", 8, &second.f_pos) == 8);
@@ -1483,6 +1655,8 @@ int main(void)
     assert(buffers.handle == INVALID_BUFFER_HANDLE);
     fail_mem_after = -1;
     assert(!buffers_init());
+    invalid_releases();
+    zero_length_writes();
     boot_buffer_preflight();
     uart_rates();
     uart_polling();
@@ -1503,9 +1677,9 @@ int main(void)
     image_tag_validation();
     slot_reuse();
     reset();
-    assert(ioctl_op(&first, HBOOT_FREE_BUFFER, -1) == -1);
-    assert(ioctl_op(&first, HBOOT_FREE_BUFFER, MAX_BUFFERS_COUNT) == -1);
-    assert(ioctl_op(&first, HBOOT_FREE_BUFFER, 0) == -1);
+    assert(ioctl_op(&first, HBOOT_FREE_BUFFER, -1) == -EINVAL);
+    assert(ioctl_op(&first, HBOOT_FREE_BUFFER, MAX_BUFFERS_COUNT) == -EINVAL);
+    assert(ioctl_op(&first, HBOOT_FREE_BUFFER, 0) == -EINVAL);
     for (i = 0; i < MAX_BUFFERS_COUNT; ++i) handles[i] = alloc(B_TYPE_PLAIN, 8, 0);
     for (i = 0; i < MAX_BUFFERS_COUNT; ++i) assert(handles[i] == i);
     assert(alloc(B_TYPE_PLAIN, 8, 0) == -1);
