@@ -1140,6 +1140,79 @@ static void allocation_copy_faults(void)
     assert(alloc(B_TYPE_NAND + 1, sizeof(payload), B_ATTR_VERIFY)
            == INVALID_BUFFER_HANDLE);
 }
+/* Unsupported commands must reject without changing shared or per-file state. */
+static void unsupported_commands(void)
+{
+    const unsigned int commands[] = { 2U, 5U, 999U, 0x80000000U, UINT_MAX };
+    struct buffers_ctx before;
+    struct plain_buffer plain;
+    struct nand_buffer nand;
+    unsigned char scattered[sizeof(struct scattered_buffer) + 2 * sizeof(uint32_t)];
+    char payload[CHUNK_SIZE + 17], actual[sizeof(payload)];
+    uint32_t bootlist[MAX_BUFFERS_COUNT];
+    unsigned int mem_before, pages_before, mem_freed, pages_freed;
+    unsigned int allocations_before, routing_before, display_before;
+    unsigned int transitions_before, l1_before, mmio_before, delays_before;
+    size_t command;
+    int caller, h;
+    reset();
+    assert(alloc(B_TYPE_PLAIN, sizeof(payload), B_ATTR_VERIFY) == 0);
+    assert(alloc(B_TYPE_SCATTERED, sizeof(payload), B_ATTR_VERIFY) == 1);
+    assert(alloc(B_TYPE_NAND, sizeof(payload), B_ATTR_VERIFY) == 2);
+    memset(payload, 0x6b, sizeof(payload));
+    for (h = 0; h < 2; ++h) {
+        assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, h));
+        assert(hbootctrl_write(&first, payload, sizeof(payload), &first.f_pos)
+               == sizeof(payload));
+    }
+    memset(buffers.bootlist, 0x5a, sizeof(bootlist));
+    before = buffers;
+    memcpy(&plain, buffers.bufs[0].container.plain, sizeof(plain));
+    memcpy(scattered, buffers.bufs[1].container.scattered, sizeof(scattered));
+    memcpy(&nand, buffers.bufs[2].container.nand, sizeof(nand));
+    memcpy(bootlist, buffers.bootlist, sizeof(bootlist));
+    mem_before = mem_attempts; pages_before = page_attempts;
+    mem_freed = mem_frees; pages_freed = page_frees;
+    allocations_before = allocations; routing_before = routing;
+    display_before = display; transitions_before = transitions;
+    l1_before = l1_builds; mmio_before = mmio_count; delays_before = poll_delays;
+    for (command = 0; command < sizeof(commands) / sizeof(commands[0]); ++command) {
+        assert(commands[command] != HBOOT_ALLOCATE_BUFFER);
+        assert(commands[command] != HBOOT_FREE_BUFFER);
+        assert(commands[command] != HBOOT_SELECT_BUFFER);
+        assert(commands[command] != HBOOT_BOOT);
+        for (caller = 0; caller < 2; ++caller) {
+            struct file *file = caller ? &second : &first;
+            first.f_pos = 3; second.f_pos = 7;
+            /* A valid live handle would affect state if misdispatched. */
+            assert(ioctl_op(file, commands[command], 1) == -ENOTTY);
+            assert(!memcmp(&before, &buffers, sizeof(before)));
+            assert(first.f_pos == 3 && second.f_pos == 7);
+            assert(!memcmp(bootlist, buffers.bootlist, sizeof(bootlist)));
+            assert(!memcmp(&plain, buffers.bufs[0].container.plain, sizeof(plain)));
+            assert(!memcmp(scattered, buffers.bufs[1].container.scattered,
+                           sizeof(scattered)));
+            assert(!memcmp(&nand, buffers.bufs[2].container.nand, sizeof(nand)));
+            for (h = 0; h < 2; ++h) {
+                snapshot_payload(h, actual, sizeof(actual));
+                assert(!memcmp(payload, actual, sizeof(payload)));
+            }
+            assert(mem_attempts == mem_before && page_attempts == pages_before);
+            assert(mem_frees == mem_freed && page_frees == pages_freed);
+            assert(allocations == allocations_before && l1_builds == l1_before);
+            assert(routing == routing_before && display == display_before);
+            assert(transitions == transitions_before && mmio_count == mmio_before);
+            assert(poll_delays == delays_before);
+            assert(!pthread_mutex_trylock(&hbootctrl_mutex));
+            pthread_mutex_unlock(&hbootctrl_mutex);
+            assert(!ioctl_op(file, HBOOT_SELECT_BUFFER, 1));
+            assert(file->f_pos == 0);
+            assert(hbootctrl_write(file, payload, sizeof(payload), &file->f_pos)
+                   == sizeof(payload));
+            assert(file->f_pos == sizeof(payload));
+        }
+    }
+}
 /* Zero-size RAM buffers must fail before metadata or payload allocation. */
 static void zero_size_allocations(void)
 {
@@ -1425,6 +1498,7 @@ int main(void)
     }
     initialization_failures();
     allocation_copy_faults();
+    unsupported_commands();
     zero_size_allocations();
     image_tag_validation();
     slot_reuse();
@@ -1483,7 +1557,6 @@ int main(void)
     copy_budget = 0;
     assert(ioctl_op(&first, HBOOT_ALLOCATE_BUFFER, (unsigned long)&req) == -EFAULT);
     copy_budget = (size_t)-1;
-    assert(ioctl_op(&first, 999, 0) == -EINVAL);
     assert(!pthread_mutex_trylock(&hbootctrl_mutex));
     pthread_mutex_unlock(&hbootctrl_mutex);
     reset(); buffers_destroy();
