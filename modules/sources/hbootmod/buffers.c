@@ -113,8 +113,8 @@ static int get_new_buffer(struct generic_buffer **pbuf)
  * Charge kmalloc requests by whole buddy blocks, conservatively covering slab
  * rounding, and reserve that charge before allocating. No large stack array.
  */
-#define HIGH_ALLOC_ATTEMPTS 128
-#define HIGH_ALLOC_BYTES (8UL * 1024 * 1024)
+#define HIGH_ALLOC_ATTEMPTS			128
+#define HIGH_ALLOC_BYTES			(8UL * 1024 * 1024)
 
 static uint32_t get_high_allocation(size_t size, unsigned int order, int pages)
 {

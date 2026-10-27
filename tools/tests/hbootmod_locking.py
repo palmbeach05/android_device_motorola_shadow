@@ -114,7 +114,7 @@ static int fail_pages, misalign_pages, fail_list, emu_uart = 115200, kill_dss = 
 static unsigned int allocations, routing, display, transitions;
 static unsigned int page_allocations, page_frees;
 static unsigned int mem_allocations, mem_frees;
-static unsigned int mem_attempts, page_attempts;
+static unsigned int mem_attempts, page_attempts, l1_builds;
 static int fail_mem_after = -1, fail_chunk_after = -1;
 static int routing_status, display_status;
 struct mmio_event { char operation; uint32_t address, value; };
@@ -191,7 +191,7 @@ static uint32_t get_high_pages(unsigned int order)
     return (uint32_t)p + (misalign_pages ? 4 : 0);
 }
 static void free_high_pages(void *p, unsigned int order) { (void)order; ++page_frees; free((char *)p - (misalign_pages ? 4 : 0)); }
-static void build_l1_table(uint32_t *table) { (void)table; }
+static void build_l1_table(uint32_t *table) { (void)table; ++l1_builds; }
 static pthread_mutex_t hbootctrl_mutex;
 static int hboot_activate_emu_uart(void)
 {
@@ -568,6 +568,127 @@ static void rejected_writes(int handle)
     assert(!memcmp(before, after, sizeof(before)));
     assert(!memcmp(&metadata, buffers.bufs[handle].container.abstract, sizeof(metadata)));
     assert(first.f_pos == first_pos && second.f_pos == second_pos);
+}
+/* Snapshot every live fixture, including packed typed metadata and bootlist.
+ * For the misaligned fixture, inspect bytes through its original allocation. */
+static void rejected_boot(int handle, void *original_payload)
+{
+    struct buffers_ctx before = buffers;
+    unsigned char metadata[MAX_BUFFERS_COUNT][sizeof(struct scattered_buffer) +
+                                               2 * sizeof(uint32_t)];
+    char payload[MAX_BUFFERS_COUNT][CHUNK_SIZE + 17], actual[CHUNK_SIZE + 17];
+    size_t metadata_size[MAX_BUFFERS_COUNT] = { 0 };
+    void *plain_data[MAX_BUFFERS_COUNT] = { 0 };
+    uint32_t bootlist[MAX_BUFFERS_COUNT];
+    unsigned int mem_before = mem_attempts, pages_before = page_attempts;
+    unsigned int mem_freed = mem_frees, pages_freed = page_frees;
+    unsigned int built = l1_builds;
+    loff_t first_pos = first.f_pos, second_pos = second.f_pos;
+    int i, enabled, failure;
+    memcpy(bootlist, buffers.bootlist, sizeof(bootlist));
+    for (i = 0; i < buffers.used; ++i) {
+        struct generic_buffer *buf = &buffers.bufs[i];
+        if (!buf->container.generic) continue;
+        switch (BUFFER_TYPE(buf->container.abstract)) {
+        case B_TYPE_PLAIN:
+            metadata_size[i] = sizeof(struct plain_buffer);
+            plain_data[i] = i == handle && original_payload ?
+                            original_payload : buf->container.plain->data;
+            memcpy(payload[i], plain_data[i], BUFFER_SIZE(buf->container.abstract));
+            break;
+        case B_TYPE_SCATTERED:
+            metadata_size[i] = sizeof(struct scattered_buffer) +
+                              buf->container.scattered->allocated_chunks * sizeof(uint32_t);
+            snapshot_payload(i, payload[i], BUFFER_SIZE(buf->container.abstract));
+            break;
+        case B_TYPE_NAND:
+            metadata_size[i] = sizeof(struct nand_buffer);
+            break;
+        default:
+            assert(0);
+        }
+        assert(metadata_size[i] <= sizeof(metadata[i]));
+        memcpy(metadata[i], buf->container.generic, metadata_size[i]);
+    }
+    for (enabled = 0; enabled < 2; ++enabled) {
+        emu_uart = enabled ? 115200 : 0;
+        for (failure = 0; failure < 2; ++failure) {
+            fail_pages = failure;
+            allocations = routing = display = transitions = 0;
+            poll_reset(-1, 0);
+            assert(ioctl_op(&second, HBOOT_BOOT, (unsigned long)handle) == -EINVAL);
+            assert(!allocations && mem_attempts == mem_before && page_attempts == pages_before);
+            assert(mem_frees == mem_freed && page_frees == pages_freed && l1_builds == built);
+            assert(!routing && !display && !transitions && !mmio_count && !poll_delays);
+            for (i = 0; i < 12; ++i) assert(!poll_reads[i]);
+            assert(!memcmp(&before, &buffers, sizeof(before)));
+            assert(!memcmp(bootlist, buffers.bootlist, sizeof(bootlist)));
+            assert(first.f_pos == first_pos && second.f_pos == second_pos);
+            for (i = 0; i < buffers.used; ++i) {
+                struct generic_buffer *buf = &buffers.bufs[i];
+                if (!buf->container.generic) continue;
+                assert(!memcmp(metadata[i], buf->container.generic, metadata_size[i]));
+                if (BUFFER_TYPE(buf->container.abstract) == B_TYPE_NAND) continue;
+                if (plain_data[i])
+                    memcpy(actual, plain_data[i], BUFFER_SIZE(buf->container.abstract));
+                else snapshot_payload(i, actual, BUFFER_SIZE(buf->container.abstract));
+                assert(!memcmp(payload[i], actual, BUFFER_SIZE(buf->container.abstract)));
+            }
+            assert(!pthread_mutex_trylock(&hbootctrl_mutex));
+            pthread_mutex_unlock(&hbootctrl_mutex);
+        }
+    }
+    fail_pages = 0;
+    emu_uart = 115200;
+}
+static void boot_buffer_preflight(void)
+{
+    int scattered, nand, freed, small[3], misaligned, i;
+    void *original;
+    reset();
+    assert(alloc(B_TYPE_PLAIN, 8, B_ATTR_VERIFY) == 0);
+    scattered = alloc(B_TYPE_SCATTERED, CHUNK_SIZE + 17, B_ATTR_VERIFY);
+    nand = alloc(B_TYPE_NAND, 123, B_ATTR_VERIFY);
+    for (i = 0; i < 3; ++i) small[i] = alloc(B_TYPE_PLAIN, i + 1, B_ATTR_VERIFY);
+    misaligned = alloc(B_TYPE_PLAIN, 8, B_ATTR_VERIFY);
+    freed = alloc(B_TYPE_PLAIN, 8, 0);
+    assert(scattered == 1 && nand == 2 && misaligned == 6 && freed == 7);
+    assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, freed));
+    assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, 0));
+    assert(hbootctrl_write(&first, "abcdefgh", 8, &first.f_pos) == 8);
+    first.f_pos = 3; second.f_pos = 7;
+    rejected_boot(-1, NULL);
+    rejected_boot(INT_MIN, NULL);
+    rejected_boot(MAX_BUFFERS_COUNT, NULL);
+    rejected_boot(INT_MAX, NULL);
+    rejected_boot(buffers.used, NULL); /* Never allocated. */
+    rejected_boot(freed, NULL);
+    rejected_boot(scattered, NULL);
+    rejected_boot(nand, NULL);
+    for (i = 0; i < 3; ++i) rejected_boot(small[i], NULL);
+    /* Test-only corruption under the operation mutex; restore before cleanup. */
+    mutex_lock(&hbootctrl_mutex);
+    original = buffers.bufs[misaligned].container.plain->data;
+    buffers.bufs[misaligned].container.plain->data = (char *)original + 1;
+    mutex_unlock(&hbootctrl_mutex);
+    rejected_boot(misaligned, original);
+    mutex_lock(&hbootctrl_mutex);
+    buffers.bufs[misaligned].container.plain->data = original;
+    mutex_unlock(&hbootctrl_mutex);
+    /* A suitable buffer still reaches the allocator and preserves ENOMEM. */
+    {
+        unsigned int pages_before = page_attempts, mem_before = mem_attempts;
+        unsigned int built = l1_builds, freed_before = page_frees;
+        fail_pages = 1;
+        allocations = routing = display = transitions = mmio_count = 0;
+        assert(ioctl_op(&first, HBOOT_BOOT, 0) == -ENOMEM);
+        assert(page_attempts == pages_before + 1 && mem_attempts == mem_before);
+        assert(allocations == 1 && l1_builds == built && page_frees == freed_before);
+        assert(!routing && !display && !transitions && !mmio_count);
+        assert(!pthread_mutex_trylock(&hbootctrl_mutex));
+        pthread_mutex_unlock(&hbootctrl_mutex);
+        fail_pages = 0;
+    }
 }
 static void selection(int type)
 {
@@ -1107,6 +1228,7 @@ static void slot_reuse(void)
 int main(void)
 {
     int i, stage, handles[MAX_BUFFERS_COUNT];
+    const int boot_stages[] = { 1, 3, 2, 4, 5, 6, 7 };
     struct hboot_buffer_req req = { 0, B_TYPE_PLAIN, 0, 8, 0 };
     struct job writer = { 0, 0, 1, 0 }, boot = { HBOOT_BOOT, 0, 0, 0 };
     struct job contenders[4] = {
@@ -1116,6 +1238,7 @@ int main(void)
     };
     assert(sizeof(void *) == 4);
     assert(!buffers_init());
+    boot_buffer_preflight();
     uart_rates();
     uart_polling();
     uart_routing_errors();
@@ -1145,7 +1268,8 @@ int main(void)
         assert(race(1, allocation, &other, 1) == MAX_BUFFERS_COUNT - 1);
         assert(other.result == -1);
     }
-    for (stage = 1; stage <= 7; ++stage) {
+    for (int checkpoint_index = 0; checkpoint_index < 7; ++checkpoint_index) {
+        stage = boot_stages[checkpoint_index];
         reset();
         assert(alloc(B_TYPE_PLAIN, 8, 0) == 0);
         assert(alloc(B_TYPE_PLAIN, 8, B_ATTR_VERIFY) == 1);
