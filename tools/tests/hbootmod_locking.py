@@ -1140,6 +1140,94 @@ static void allocation_copy_faults(void)
     assert(alloc(B_TYPE_NAND + 1, sizeof(payload), B_ATTR_VERIFY)
            == INVALID_BUFFER_HANDLE);
 }
+/* Zero-size RAM buffers must fail before metadata or payload allocation. */
+static void zero_size_allocations(void)
+{
+    struct plain_buffer plain;
+    struct nand_buffer nand;
+    unsigned char scattered[sizeof(struct scattered_buffer) + 2 * sizeof(uint32_t)];
+    char payload[CHUNK_SIZE + 17], actual[sizeof(payload)];
+    uint32_t bootlist[MAX_BUFFERS_COUNT];
+    int type, direct;
+    reset();
+    assert(alloc(B_TYPE_PLAIN, sizeof(payload), B_ATTR_VERIFY) == 0);
+    assert(alloc(B_TYPE_SCATTERED, sizeof(payload), B_ATTR_VERIFY) == 1);
+    assert(alloc(B_TYPE_NAND, sizeof(payload), B_ATTR_VERIFY) == 2);
+    memset(payload, 0x6b, sizeof(payload));
+    for (type = 0; type < 2; ++type) {
+        assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, type));
+        assert(hbootctrl_write(&first, payload, sizeof(payload), &first.f_pos)
+               == sizeof(payload));
+    }
+    first.f_pos = 3;
+    second.f_pos = 7;
+    memcpy(&plain, buffers.bufs[0].container.plain, sizeof(plain));
+    memcpy(scattered, buffers.bufs[1].container.scattered, sizeof(scattered));
+    memcpy(&nand, buffers.bufs[2].container.nand, sizeof(nand));
+    memcpy(bootlist, buffers.bootlist, sizeof(bootlist));
+    for (type = B_TYPE_PLAIN; type <= B_TYPE_NAND; ++type) {
+        for (direct = 0; direct < 2; ++direct) {
+            struct hboot_buffer_req req = { IMG_LINUX, type, B_ATTR_VERIFY, 0, 123 };
+            struct buffers_ctx before = buffers;
+            unsigned int mem_before = mem_attempts, pages_before = page_attempts;
+            unsigned int mem_freed = mem_frees, pages_freed = page_frees;
+            int handle;
+            assert(buffers.used < MAX_BUFFERS_COUNT);
+            if (direct) {
+                mutex_lock(&hbootctrl_mutex);
+                handle = allocate_buffer(req.tag, req.type, req.attrs, req.size, req.rest);
+                mutex_unlock(&hbootctrl_mutex);
+            } else {
+                handle = ioctl_op(&second, HBOOT_ALLOCATE_BUFFER, (unsigned long)&req);
+            }
+            if (type == B_TYPE_NAND) {
+                /* NAND describes a storage range and allocates only metadata. */
+                assert(handle == 3);
+                assert(mem_attempts == mem_before + 1);
+                assert(buffers.bufs[handle].container.nand->offset == req.rest);
+                assert(buffers.bufs[handle].container.abstract->size == 0);
+                assert(buffers.bufs[handle].container.abstract->tag == req.tag);
+                assert(buffers.bufs[handle].container.abstract->type == B_TYPE_NAND);
+            } else {
+                assert(handle == INVALID_BUFFER_HANDLE);
+                assert(mem_attempts == mem_before);
+                assert(!memcmp(&before, &buffers, sizeof(before)));
+            }
+            assert(page_attempts == pages_before);
+            assert(mem_frees == mem_freed && page_frees == pages_freed);
+            assert(!memcmp(bootlist, buffers.bootlist, sizeof(bootlist)));
+            assert(buffers.handle == before.handle);
+            assert(first.f_pos == 3 && second.f_pos == 7);
+            assert(!memcmp(&plain, buffers.bufs[0].container.plain, sizeof(plain)));
+            assert(!memcmp(scattered, buffers.bufs[1].container.scattered,
+                           sizeof(scattered)));
+            assert(!memcmp(&nand, buffers.bufs[2].container.nand, sizeof(nand)));
+            for (int h = 0; h < 3; ++h)
+                assert(buffers.bufs[h].container.generic == before.bufs[h].container.generic);
+            for (int h = 0; h < 2; ++h) {
+                snapshot_payload(h, actual, sizeof(actual));
+                assert(!memcmp(payload, actual, sizeof(payload)));
+            }
+            assert(!pthread_mutex_trylock(&hbootctrl_mutex));
+            pthread_mutex_unlock(&hbootctrl_mutex);
+            if (type == B_TYPE_NAND)
+                assert(!ioctl_op(&second, HBOOT_FREE_BUFFER, handle));
+            /* The same entry path must still accept a nonzero request. */
+            req.size = sizeof(payload);
+            if (direct) {
+                mutex_lock(&hbootctrl_mutex);
+                handle = allocate_buffer(req.tag, req.type, req.attrs, req.size, req.rest);
+                mutex_unlock(&hbootctrl_mutex);
+            } else {
+                handle = ioctl_op(&second, HBOOT_ALLOCATE_BUFFER, (unsigned long)&req);
+            }
+            assert(handle == 3);
+            assert(buffers.bufs[handle].container.abstract->size == req.size);
+            assert(buffers.bufs[handle].container.abstract->type == type);
+            assert(!ioctl_op(&second, HBOOT_FREE_BUFFER, handle));
+        }
+    }
+}
 /* Issue #41: unsupported tags must fail with capacity still available. */
 static void image_tag_validation(void)
 {
@@ -1326,6 +1414,7 @@ int main(void)
     }
     initialization_failures();
     allocation_copy_faults();
+    zero_size_allocations();
     image_tag_validation();
     slot_reuse();
     reset();
