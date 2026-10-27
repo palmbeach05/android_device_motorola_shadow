@@ -1067,6 +1067,79 @@ static void full_table_rejection(void **live, char payload[MAX_BUFFERS_COUNT][8]
         }
     }
 }
+/* Incomplete allocation requests must not reach any typed allocator. */
+static void allocation_copy_faults(void)
+{
+    struct plain_buffer plain;
+    struct nand_buffer nand;
+    unsigned char scattered[sizeof(struct scattered_buffer) + 2 * sizeof(uint32_t)];
+    char payload[CHUNK_SIZE + 17], actual[sizeof(payload)];
+    uint32_t bootlist[MAX_BUFFERS_COUNT];
+    struct buffers_ctx before;
+    unsigned int mem_before, pages_before, mem_freed, pages_freed;
+    size_t copied;
+    int type, caller;
+    reset();
+    assert(alloc(B_TYPE_PLAIN, sizeof(payload), B_ATTR_VERIFY) == 0);
+    assert(alloc(B_TYPE_SCATTERED, sizeof(payload), B_ATTR_VERIFY) == 1);
+    assert(alloc(B_TYPE_NAND, sizeof(payload), B_ATTR_VERIFY) == 2);
+    memset(payload, 0x6b, sizeof(payload));
+    for (type = 0; type < 2; ++type) {
+        assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, type));
+        assert(hbootctrl_write(&first, payload, sizeof(payload), &first.f_pos)
+               == sizeof(payload));
+    }
+    first.f_pos = 3;
+    second.f_pos = 7;
+    before = buffers;
+    memcpy(&plain, buffers.bufs[0].container.plain, sizeof(plain));
+    memcpy(scattered, buffers.bufs[1].container.scattered, sizeof(scattered));
+    memcpy(&nand, buffers.bufs[2].container.nand, sizeof(nand));
+    memcpy(bootlist, buffers.bootlist, sizeof(bootlist));
+    mem_before = mem_attempts; pages_before = page_attempts;
+    mem_freed = mem_frees; pages_freed = page_frees;
+    for (type = B_TYPE_PLAIN; type <= B_TYPE_NAND; ++type) {
+        struct hboot_buffer_req req = {
+            IMG_LINUX, type, B_ATTR_VERIFY, sizeof(payload), 123
+        };
+        for (caller = 0; caller < 2; ++caller) {
+            struct file *file = caller ? &second : &first;
+            for (copied = 0; copied < sizeof(req); ++copied) {
+                assert(buffers.used < MAX_BUFFERS_COUNT);
+                copy_budget = copied;
+                assert(ioctl_op(file, HBOOT_ALLOCATE_BUFFER, (unsigned long)&req)
+                       == -EFAULT);
+                assert(copy_budget == 0);
+                assert(mem_attempts == mem_before && page_attempts == pages_before);
+                assert(mem_frees == mem_freed && page_frees == pages_freed);
+                assert(!memcmp(&before, &buffers, sizeof(before)));
+                assert(!memcmp(bootlist, buffers.bootlist, sizeof(bootlist)));
+                assert(first.f_pos == 3 && second.f_pos == 7);
+                assert(!memcmp(&plain, buffers.bufs[0].container.plain, sizeof(plain)));
+                assert(!memcmp(scattered, buffers.bufs[1].container.scattered,
+                               sizeof(scattered)));
+                assert(!memcmp(&nand, buffers.bufs[2].container.nand, sizeof(nand)));
+                for (int h = 0; h < 2; ++h) {
+                    snapshot_payload(h, actual, sizeof(actual));
+                    assert(!memcmp(payload, actual, sizeof(payload)));
+                }
+                assert(!pthread_mutex_trylock(&hbootctrl_mutex));
+                pthread_mutex_unlock(&hbootctrl_mutex);
+            }
+        }
+        copy_budget = (size_t)-1;
+        assert(ioctl_op(&second, HBOOT_ALLOCATE_BUFFER, (unsigned long)&req) == 3);
+        assert(buffers.bufs[3].container.abstract->type == type);
+        assert(!ioctl_op(&second, HBOOT_FREE_BUFFER, 3));
+        /* Freeing the successful request preserves the high-water extent. */
+        before = buffers;
+        mem_before = mem_attempts; pages_before = page_attempts;
+        mem_freed = mem_frees; pages_freed = page_frees;
+    }
+    /* A fully copied unsupported type retains the allocation error value. */
+    assert(alloc(B_TYPE_NAND + 1, sizeof(payload), B_ATTR_VERIFY)
+           == INVALID_BUFFER_HANDLE);
+}
 /* Issue #41: unsupported tags must fail with capacity still available. */
 static void image_tag_validation(void)
 {
@@ -1252,6 +1325,7 @@ int main(void)
         crc_lifecycle(B_TYPE_SCATTERED, i ? B_ATTR_VERIFY : 0);
     }
     initialization_failures();
+    allocation_copy_faults();
     image_tag_validation();
     slot_reuse();
     reset();
@@ -1307,7 +1381,7 @@ int main(void)
     assert(ioctl_op(&first, HBOOT_BOOT, 0) == -ENOMEM);
     fail_list = 0;
     copy_budget = 0;
-    assert(ioctl_op(&first, HBOOT_ALLOCATE_BUFFER, (unsigned long)&req) == -EINVAL);
+    assert(ioctl_op(&first, HBOOT_ALLOCATE_BUFFER, (unsigned long)&req) == -EFAULT);
     copy_budget = (size_t)-1;
     assert(ioctl_op(&first, 999, 0) == -EINVAL);
     assert(!pthread_mutex_trylock(&hbootctrl_mutex));
