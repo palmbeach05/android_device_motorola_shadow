@@ -1398,6 +1398,17 @@ int main(void)
         { HBOOT_BOOT, 0, 0, 0 }
     };
     assert(sizeof(void *) == 4);
+    /* Fail boot-list allocation before the first successful initialization. */
+    fail_mem_after = 0;
+    assert(buffers_init() == -ENOMEM);
+    assert(mem_attempts == 1 && mem_allocations == 0);
+    assert(page_attempts == 0 && page_allocations == 0);
+    assert(mem_frees == 0 && page_frees == 0);
+    assert(buffers.bootlist == NULL && buffers.used == 0);
+    for (i = 0; i < MAX_BUFFERS_COUNT; ++i)
+        assert(buffers.bufs[i].container.generic == NULL);
+    assert(buffers.handle == INVALID_BUFFER_HANDLE);
+    fail_mem_after = -1;
     assert(!buffers_init());
     boot_buffer_preflight();
     uart_rates();

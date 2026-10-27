@@ -579,7 +579,7 @@ int buffers_init(void)
 	buffers.handle = INVALID_BUFFER_HANDLE;
 	buffers.bootlist = (void*)get_high_mem(MAX_BUFFERS_COUNT*sizeof(void*));
 	if (buffers.bootlist == NULL)
-		return -1;
+		return -ENOMEM;
 	return 0;
 }
 
