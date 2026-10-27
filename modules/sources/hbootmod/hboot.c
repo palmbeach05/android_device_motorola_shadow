@@ -439,7 +439,7 @@ static int hbootctrl_ioctl(struct inode *inode, struct file *file,
 		break;
 
 	default:
-		ret = -EINVAL;
+		ret = -ENOTTY;
 		break;
 	}
 	mutex_unlock(&hbootctrl_mutex);
