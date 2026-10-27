@@ -465,7 +465,7 @@ static int find_my_dev(struct device *dev, void *data)
 		drv_name = dev->driver->name;
 
 	printk("dev[%s], driver[%s]\n", dev_name(dev), drv_name);
-	if (!strncmp((char *)data, dev_name(dev), strlen((char *)data))) {
+	if (!strcmp((char *)data, dev_name(dev))) {
 		printk(KERN_INFO "Found it\n");
 		return 1;
 	}

@@ -3,7 +3,8 @@
 
 Run: python3 tools/tests/hbootmod_device_refs.py
 Requires a Linux development host and a C compiler. Extracts the actual display
-and UART preparation helpers, mocking device references, suspend and hardware.
+and UART preparation helpers and name callbacks, mocking device references,
+suspend and hardware.
 No real device operations or boot transition are included. This does not verify
 target compilation, driver-binding stability, or hardware behavior.
 """
@@ -27,6 +28,10 @@ helpers = function((source / 'hboot.c').read_text(),
                    'static int disable_dss(void)')
 helpers += '\n' + function((source / 'emu_uart.c').read_text(),
                            'int hboot_activate_emu_uart(void)')
+helpers += '\n' + function((source / 'hboot.c').read_text(),
+                           'static int find_my_dev(struct device *dev, void *data)')
+helpers += '\n' + function((source / 'emu_uart.c').read_text(),
+                           'static int find_device(struct device *dev, void *data)')
 preamble = r'''
 #include <assert.h>
 #include <errno.h>
@@ -37,8 +42,12 @@ preamble = r'''
 #include <unistd.h>
 typedef unsigned short u16;
 typedef struct { int event; } pm_message_t;
-struct device_driver { int unused; };
-struct device { struct device_driver *driver; void *platform_data; };
+struct device_driver { const char *name; };
+struct device {
+    struct device_driver *driver;
+    void *platform_data;
+    const char *name;
+};
 struct platform_device { struct device dev; };
 struct platform_driver {
     struct device_driver driver;
@@ -77,21 +86,22 @@ static void record(int event)
     assert(event_count < 32);
     events[event_count++] = event;
 }
-static int find_my_dev(struct device *dev, void *data)
-{ (void)dev; (void)data; return 1; }
-static int find_device(struct device *dev, void *data)
-{ (void)dev; (void)data; return 1; }
+static const char *dev_name(struct device *dev) { return dev->name; }
+static int find_my_dev(struct device *dev, void *data);
+static int find_device(struct device *dev, void *data);
 static struct device *device_find_child(struct device *parent, void *name,
                                        int (*match)(struct device *, void *))
 {
+    struct device *child = uart ? &devices->uart : &devices->display.dev;
     assert(parent == &platform_bus && !live);
     assert(!strcmp(name, uart ? "cpcap_usb" : "omapdss"));
     assert(match == (uart ? find_device : find_my_dev));
     record(LOOKUP);
     if (!found) return NULL;
+    if (!match(child, name)) return NULL;
     ++acquired;
     live = 1;
-    return uart ? &devices->uart : &devices->display.dev;
+    return child;
 }
 static void put_device(struct device *dev)
 {
@@ -151,8 +161,9 @@ static void write_omap_mux_register(u16 offset, unsigned char mode,
 }
 '''
 tests = r'''
-static void scenario(int is_uart, int lookup, int driver, int callback, int data,
-                     int result, int spi, int failure)
+static void named_scenario(int is_uart, int lookup, int driver, int callback,
+                           int data, int result, int spi, int failure,
+                           const char *name)
 {
     int expected[32], count = 0, i, status = 0;
     int before_acquired = acquired, before_released = released;
@@ -160,11 +171,14 @@ static void scenario(int is_uart, int lookup, int driver, int callback, int data
     assert(!mprotect(devices, page_size, PROT_READ | PROT_WRITE));
     memset(devices, 0, sizeof(*devices));
     uart = is_uart; found = lookup; suspend_result = result; event_count = 0;
+    devices->display.dev.name = devices->uart.name = name;
     devices->display.dev.driver = driver ? &devices->driver.driver : NULL;
     devices->driver.suspend = callback ? suspend_device : NULL;
     devices->uart.platform_data = data ? &devices->data : NULL;
     devices->data.spi = spi ? &devices->spi : NULL;
     fail_transaction = failure; transaction_count = warnings = 0;
+    /* Expected lookup outcome is independent of the production callback. */
+    lookup = lookup && !strcmp(name, uart ? "cpcap_usb" : "omapdss");
     expected[count++] = LOOKUP;
     if (lookup) {
         if (uart && data && spi) {
@@ -201,6 +215,12 @@ static void scenario(int is_uart, int lookup, int driver, int callback, int data
     assert(event_count == count);
     assert(!memcmp(events, expected, count * sizeof(*events)));
 }
+static void scenario(int is_uart, int lookup, int driver, int callback, int data,
+                     int result, int spi, int failure)
+{
+    named_scenario(is_uart, lookup, driver, callback, data, result, spi, failure,
+                   is_uart ? "cpcap_usb" : "omapdss");
+}
 int main(void)
 {
     int repeat;
@@ -210,6 +230,15 @@ int main(void)
                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     assert(devices != MAP_FAILED);
     for (repeat = 0; repeat < 100; ++repeat) {
+        /* Rejected names must produce only LOOKUP, with no preparation or PUT. */
+        named_scenario(0, 1, 1, 1, 0, 0, 0, 0, "omapdss");
+        named_scenario(0, 1, 1, 1, 0, 0, 0, 0, "omap");
+        named_scenario(0, 1, 1, 1, 0, 0, 0, 0, "omapdss_extra");
+        named_scenario(0, 1, 1, 1, 0, 0, 0, 0, "unrelated");
+        named_scenario(1, 1, 0, 0, 1, 0, 1, 0, "cpcap_usb");
+        named_scenario(1, 1, 0, 0, 1, 0, 1, 0, "cpcap");
+        named_scenario(1, 1, 0, 0, 1, 0, 1, 0, "cpcap_usb_extra");
+        named_scenario(1, 1, 0, 0, 1, 0, 1, 0, "unrelated");
         scenario(0, 0, 0, 0, 0, 0, 0, 0);
         scenario(0, 1, 0, 0, 0, 0, 0, 0);
         scenario(0, 1, 1, 0, 0, 0, 0, 0);
@@ -224,7 +253,7 @@ int main(void)
         scenario(1, 1, 0, 0, 1, 0, 1, 3);
         scenario(1, 1, 0, 0, 1, 0, 1, 0);
     }
-    assert(acquired == 1100 && released == 1100);
+    assert(acquired == 1300 && released == 1300);
     assert(!munmap(devices, page_size));
     puts("hbootmod preparation device-reference checks passed");
     return 0;
