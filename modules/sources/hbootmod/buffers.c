@@ -277,7 +277,11 @@ static int append_scattered_buffer(struct generic_buffer *buf, const char __user
 	int chunk;
 	int chunk_off;
 
-	if (pos < 0 || pos >= BUFFER_SIZE(sc))
+	if (pos < 0 || pos > BUFFER_SIZE(sc))
+		return -EINVAL;
+	if (size == 0)
+		return 0;
+	if (pos == BUFFER_SIZE(sc))
 		return -EINVAL;
 
 	if (size > BUFFER_SIZE(sc) - pos)
@@ -336,7 +340,11 @@ static int append_plain_buffer(struct generic_buffer *buf, const char __user *da
 	size_t uncopied;
 	size_t copied;
 
-	if (pos < 0 || pos >= BUFFER_SIZE(pb))
+	if (pos < 0 || pos > BUFFER_SIZE(pb))
+		return -EINVAL;
+	if (size == 0)
+		return 0;
+	if (pos == BUFFER_SIZE(pb))
 		return -EINVAL;
 
 	if (size > BUFFER_SIZE(pb) - pos)
@@ -440,7 +448,7 @@ int free_buffer(int handle)
 
 	buf = get_buffer(handle);
 	if (buf == NULL)
-		return -1;
+		return -EINVAL;
 
 	data = buf->container.generic;
 	type = BUFFER_TYPE(buf->container.abstract);
