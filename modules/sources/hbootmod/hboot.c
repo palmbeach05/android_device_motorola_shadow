@@ -412,7 +412,7 @@ static int hbootctrl_ioctl(struct inode *inode, struct file *file,
 	case HBOOT_ALLOCATE_BUFFER:
 		if (copy_from_user((void *)&buf_req, (void *)arg,
 			   sizeof(struct hboot_buffer_req)) != 0) {
-			ret = -EINVAL;
+			ret = -EFAULT;
 			break;
 		}
 
