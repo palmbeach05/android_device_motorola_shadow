@@ -23,6 +23,34 @@ $BB_STATIC cp -f /system/bootstrap/binary/hbootuser $BOOT_DIR/hbootuser || fail 
 $BB_STATIC cp -f /system/bootstrap/modules/hbootmod.ko $BOOT_DIR/hbootmod.ko || fail "Cannot stage hbootmod"
 $BB_STATIC chmod 755 $BOOT_DIR/* || fail "Cannot set boot file permissions"
 
+# Validate the selected boot files before filesystem teardown.
+BOOT_CFG=hboot.cfg
+RAMDISK=ramdisk
+CMDLINE=cmdline
+if [ "$1" = "recovery" ]; then
+    BOOT_CFG=hboot_recovery.cfg
+    RAMDISK=ramdisk-recovery
+    CMDLINE=cmdline-recovery
+fi
+
+echo "2nd-boot: validating staged files ($BOOT_CFG)"
+cd "$BOOT_DIR" || fail "Cannot enter $BOOT_DIR"
+for FILE in hbootuser hbootmod.ko "$BOOT_CFG" hboot.bin zImage "$RAMDISK" devtree "$CMDLINE"; do
+    [ -f "./$FILE" ] && [ -r "./$FILE" ] && [ -s "./$FILE" ] ||
+        fail "Missing, unreadable or empty staged file: $FILE"
+done
+# Descriptors are fixed five-entry file lists; reject damaged or unexpected
+# paths rather than discovering them after /data has been unmounted.
+$BB_STATIC awk -v ramdisk="$RAMDISK" -v cmdline="$CMDLINE" '
+    BEGIN {
+        path[1] = "./hboot.bin"; path[2] = "./zImage"
+        path[3] = "./" ramdisk; path[4] = "./devtree"
+        path[5] = "./" cmdline
+    }
+    NF != 3 || $1 != NR - 1 || $2 != "file" || $3 != path[NR] { bad = 1 }
+    END { if (bad || NR != 5) exit 1 }
+' "./$BOOT_CFG" || fail "Invalid selected descriptor: $BOOT_CFG"
+
 # --- Preserve stock hboot command-line parameters ---
 # Read the authoritative values from the running system's /proc/cmdline
 # (do NOT use ro.serialno / ro.boot.serialno / ro.ril.barcode / /pds, they
@@ -32,7 +60,13 @@ $BB_STATIC chmod 755 $BOOT_DIR/* || fail "Cannot set boot file permissions"
 # cmdline may list it more than once, e.g. androidboot.bootloader=0x0000
 # followed by androidboot.bootloader=3004; only the last one is authoritative),
 # and brdrev.
-STOCK_CMDLINE=`$BB_STATIC cat /proc/cmdline`
+echo "2nd-boot: reading stock command line"
+LC_ALL=C $BB_STATIC awk '
+    NR != 1 || $0 !~ /^[ -~]+$/ || $0 !~ /[^ ]/ { bad = 1 }
+    END { if (bad || NR != 1) exit 1 }
+' /proc/cmdline || fail "Invalid stock command line"
+STOCK_CMDLINE=`$BB_STATIC cat /proc/cmdline` || fail "Cannot read /proc/cmdline"
+[ -n "$STOCK_CMDLINE" ] || fail "Empty /proc/cmdline"
 
 is_valid_token() {
     $BB_STATIC echo "$1" | $BB_STATIC grep -Eq '^[A-Za-z0-9._-]+$'
@@ -62,18 +96,32 @@ else
     $BB_STATIC echo "2nd-boot: missing or invalid brdrev in /proc/cmdline, skipping"
 fi
 
-if [ -n "$PAYLOAD" ]; then
-    for CMDFILE in $BOOT_DIR/cmdline $BOOT_DIR/cmdline-recovery; do
-        BASELINE=`$BB_STATIC cat $CMDFILE`
+# Validate both baselines even when no stock tokens can be forwarded.
+for CMDFILE in "$BOOT_DIR/cmdline" "$BOOT_DIR/cmdline-recovery"; do
+    [ -f "$CMDFILE" ] && [ -r "$CMDFILE" ] || fail "Cannot read $CMDFILE"
+    LC_ALL=C $BB_STATIC awk '
+        NR != 1 || length($0) > 1023 || $0 !~ /^[ -~]+$/ || $0 !~ /[^ ]/ { bad = 1 }
+        END { if (bad || NR != 1) exit 1 }
+    ' "$CMDFILE" || fail "Invalid command-line baseline: $CMDFILE"
+    BASELINE=`$BB_STATIC cat "$CMDFILE"` || fail "Cannot read $CMDFILE"
+    if [ -n "$PAYLOAD" ]; then
         NEWLINE="$BASELINE$PAYLOAD"
-        LEN=`$BB_STATIC echo -n "$NEWLINE" | $BB_STATIC wc -c`
-        if [ "$LEN" -le 1023 ]; then
-            $BB_STATIC echo "$NEWLINE" > $CMDFILE
-        else
-            $BB_STATIC echo "2nd-boot: stock payload too long for $CMDFILE, skipping stock cmdline injection"
+        LEN=`$BB_STATIC printf '%s' "$NEWLINE" | $BB_STATIC wc -c` ||
+            fail "Cannot measure command line: $CMDFILE"
+        [ "$LEN" -le 1023 ] || fail "Stock payload too long for $CMDFILE"
+        TMPFILE="$CMDFILE.tmp"
+        if ! $BB_STATIC printf '%s\n' "$NEWLINE" > "$TMPFILE"; then
+            $BB_STATIC rm -f "$TMPFILE"
+            fail "Cannot write command line: $CMDFILE"
         fi
-    done
-fi
+        if ! $BB_STATIC mv -f "$TMPFILE" "$CMDFILE"; then
+            $BB_STATIC rm -f "$TMPFILE"
+            fail "Cannot replace command line: $CMDFILE"
+        fi
+    fi
+done
+
+echo "2nd-boot: preparation complete; unmounting filesystems"
 
 $BB_STATIC sync
 
@@ -86,8 +134,6 @@ $BB_STATIC umount /cache
 $BB_STATIC umount /data
 
 $BB_STATIC echo 18 > /sys/class/leds/lcd-backlight/brightness
-
-cd "$BOOT_DIR" || fail "Cannot enter $BOOT_DIR"
 
 $BB_STATIC echo "Inserting hbootmod..."
 if [ "$1" = "uart" ]; then
@@ -119,9 +165,8 @@ $BB_STATIC mknod /dev/hbootctrl c "$MAJOR" 0 || fail "Cannot create hbootctrl de
 $BB_STATIC chmod 600 /dev/hbootctrl || fail "Cannot restrict hbootctrl permissions"
 [ -c /dev/hbootctrl ] || fail "hbootctrl is not a character device"
 
-$BB_STATIC echo "Jumping to custom kernel..."
-if [ "$1" = "recovery" ]; then
-    ./hbootuser ./hboot_recovery.cfg || fail "Recovery boot failed"
-else
-    ./hbootuser ./hboot.cfg || fail "System boot failed"
-fi
+echo "2nd-boot: starting loader ($BOOT_CFG)"
+./hbootuser "./$BOOT_CFG"
+LOADER_STATUS=$?
+echo "2nd-boot: loader returned status $LOADER_STATUS" >&2
+exit "$LOADER_STATUS"
