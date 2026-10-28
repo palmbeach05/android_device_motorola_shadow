@@ -23,34 +23,6 @@ $BB_STATIC cp -f /system/bootstrap/binary/hbootuser $BOOT_DIR/hbootuser || fail 
 $BB_STATIC cp -f /system/bootstrap/modules/hbootmod.ko $BOOT_DIR/hbootmod.ko || fail "Cannot stage hbootmod"
 $BB_STATIC chmod 755 $BOOT_DIR/* || fail "Cannot set boot file permissions"
 
-# Validate the selected boot files before filesystem teardown.
-BOOT_CFG=hboot.cfg
-RAMDISK=ramdisk
-CMDLINE=cmdline
-if [ "$1" = "recovery" ]; then
-    BOOT_CFG=hboot_recovery.cfg
-    RAMDISK=ramdisk-recovery
-    CMDLINE=cmdline-recovery
-fi
-
-echo "2nd-boot: validating staged files ($BOOT_CFG)"
-cd "$BOOT_DIR" || fail "Cannot enter $BOOT_DIR"
-for FILE in hbootuser hbootmod.ko "$BOOT_CFG" hboot.bin zImage "$RAMDISK" devtree "$CMDLINE"; do
-    [ -f "./$FILE" ] && [ -r "./$FILE" ] && [ -s "./$FILE" ] ||
-        fail "Missing, unreadable or empty staged file: $FILE"
-done
-# Descriptors are fixed five-entry file lists; reject damaged or unexpected
-# paths rather than discovering them after /data has been unmounted.
-$BB_STATIC awk -v ramdisk="$RAMDISK" -v cmdline="$CMDLINE" '
-    BEGIN {
-        path[1] = "./hboot.bin"; path[2] = "./zImage"
-        path[3] = "./" ramdisk; path[4] = "./devtree"
-        path[5] = "./" cmdline
-    }
-    NF != 3 || $1 != NR - 1 || $2 != "file" || $3 != path[NR] { bad = 1 }
-    END { if (bad || NR != 5) exit 1 }
-' "./$BOOT_CFG" || fail "Invalid selected descriptor: $BOOT_CFG"
-
 # --- Preserve stock hboot command-line parameters ---
 # Read the authoritative values from the running system's /proc/cmdline
 # (do NOT use ro.serialno / ro.boot.serialno / ro.ril.barcode / /pds, they
@@ -135,6 +107,8 @@ $BB_STATIC umount /data
 
 $BB_STATIC echo 18 > /sys/class/leds/lcd-backlight/brightness
 
+cd "$BOOT_DIR" || fail "Cannot enter $BOOT_DIR"
+
 $BB_STATIC echo "Inserting hbootmod..."
 if [ "$1" = "uart" ]; then
     $BB_STATIC insmod ./hbootmod.ko kill_dss=1 emu_uart=115200 || fail "Cannot load hbootmod (UART)"
@@ -165,8 +139,9 @@ $BB_STATIC mknod /dev/hbootctrl c "$MAJOR" 0 || fail "Cannot create hbootctrl de
 $BB_STATIC chmod 600 /dev/hbootctrl || fail "Cannot restrict hbootctrl permissions"
 [ -c /dev/hbootctrl ] || fail "hbootctrl is not a character device"
 
-echo "2nd-boot: starting loader ($BOOT_CFG)"
-./hbootuser "./$BOOT_CFG"
-LOADER_STATUS=$?
-echo "2nd-boot: loader returned status $LOADER_STATUS" >&2
-exit "$LOADER_STATUS"
+$BB_STATIC echo "Jumping to custom kernel..."
+if [ "$1" = "recovery" ]; then
+    ./hbootuser ./hboot_recovery.cfg || fail "Recovery boot failed"
+else
+    ./hbootuser ./hboot.cfg || fail "System boot failed"
+fi
