@@ -7,6 +7,8 @@ obj-m += symsearch/
 obj-m += backlight/
 obj-m += overclock/
 
+obj-m += hbootmod/
+
 #obj-m += multitouch/
 #obj-m += mmcfix/
 #obj-m += gpiofix/

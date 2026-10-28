@@ -2,7 +2,7 @@
 #include "crc32.h"
 
 /* taken from zlib */
-static const uint32_t crc32_table[256] = 
+static const uint32_t crc32_table[256] =
 {
  0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f, 0xe963a535, 0x9e6495a3,
  0x0edb8832, 0x79dcb8a4, 0xe0d5e91e, 0x97d2d988, 0x09b64c2b, 0x7eb17cbd, 0xe7b82d07, 0x90bf1d91,
@@ -43,18 +43,18 @@ void crc32_init_ctx(uint32_t *ctx)
 	*ctx = 0xffffffff;
 }
 
-void crc32_update(uint32_t *ctx, const uint8_t *data, size_t size) 
+void crc32_update(uint32_t *ctx, const uint8_t *data, size_t size)
 {
-	while (size-- > 0) 
+	while (size-- > 0)
 		*ctx = crc32_table[(*ctx ^ *data++) & 0xff] ^ (*ctx >> 8);
 }
 
-void crc32_final(uint32_t *ctx) 
+void crc32_final(uint32_t *ctx)
 {
 	*ctx ^= 0xffffffff;
 }
 
-uint32_t crc32(const uint8_t *data, size_t size) 
+uint32_t crc32(const uint8_t *data, size_t size)
 {
 	uint32_t ctx;
 

@@ -40,9 +40,11 @@ PRODUCT_COPY_FILES += \
 
 # Bootstrap Modules
 PRODUCT_COPY_FILES += \
-	$(DEVICE_PATH)/bootstrap/modules/hbootmod.ko:system/bootstrap/modules/hbootmod.ko \
 	$(DEVICE_PATH)/bootstrap/modules/jbd2.ko:system/bootstrap/modules/jbd2.ko \
 	$(DEVICE_PATH)/bootstrap/modules/ext4.ko:system/bootstrap/modules/ext4.ko
+
+PRODUCT_COPY_FILES += \
+	$(DEVICE_PATH)/bootstrap/modules/hbootmod.ko:system/bootstrap/modules/hbootmod.ko
 
 # Generated Files
 PRODUCT_COPY_FILES += \
