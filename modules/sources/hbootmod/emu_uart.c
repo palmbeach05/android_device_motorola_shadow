@@ -267,7 +267,7 @@ static int cpcap_config_for_write(struct spi_device *spi, unsigned short reg,
 
 static int find_device(struct device *dev, void *data)
 {
-	if (!strncmp((char *)data, dev_name(dev), strlen((char *)data)))
+	if (!strcmp((char *)data, dev_name(dev)))
 		return 1;
 
 	return 0;
