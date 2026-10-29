@@ -32,13 +32,7 @@ $BB_STATIC chmod 755 $BOOT_DIR/* || fail "Cannot set boot file permissions"
 # cmdline may list it more than once, e.g. androidboot.bootloader=0x0000
 # followed by androidboot.bootloader=3004; only the last one is authoritative),
 # and brdrev.
-echo "2nd-boot: reading stock command line"
-LC_ALL=C $BB_STATIC awk '
-    NR != 1 || $0 !~ /^[ -~]+$/ || $0 !~ /[^ ]/ { bad = 1 }
-    END { if (bad || NR != 1) exit 1 }
-' /proc/cmdline || fail "Invalid stock command line"
-STOCK_CMDLINE=`$BB_STATIC cat /proc/cmdline` || fail "Cannot read /proc/cmdline"
-[ -n "$STOCK_CMDLINE" ] || fail "Empty /proc/cmdline"
+STOCK_CMDLINE=`$BB_STATIC cat /proc/cmdline`
 
 is_valid_token() {
     $BB_STATIC echo "$1" | $BB_STATIC grep -Eq '^[A-Za-z0-9._-]+$'
@@ -68,32 +62,18 @@ else
     $BB_STATIC echo "2nd-boot: missing or invalid brdrev in /proc/cmdline, skipping"
 fi
 
-# Validate both baselines even when no stock tokens can be forwarded.
-for CMDFILE in "$BOOT_DIR/cmdline" "$BOOT_DIR/cmdline-recovery"; do
-    [ -f "$CMDFILE" ] && [ -r "$CMDFILE" ] || fail "Cannot read $CMDFILE"
-    LC_ALL=C $BB_STATIC awk '
-        NR != 1 || length($0) > 1023 || $0 !~ /^[ -~]+$/ || $0 !~ /[^ ]/ { bad = 1 }
-        END { if (bad || NR != 1) exit 1 }
-    ' "$CMDFILE" || fail "Invalid command-line baseline: $CMDFILE"
-    BASELINE=`$BB_STATIC cat "$CMDFILE"` || fail "Cannot read $CMDFILE"
-    if [ -n "$PAYLOAD" ]; then
+if [ -n "$PAYLOAD" ]; then
+    for CMDFILE in $BOOT_DIR/cmdline $BOOT_DIR/cmdline-recovery; do
+        BASELINE=`$BB_STATIC cat $CMDFILE`
         NEWLINE="$BASELINE$PAYLOAD"
-        LEN=`$BB_STATIC printf '%s' "$NEWLINE" | $BB_STATIC wc -c` ||
-            fail "Cannot measure command line: $CMDFILE"
-        [ "$LEN" -le 1023 ] || fail "Stock payload too long for $CMDFILE"
-        TMPFILE="$CMDFILE.tmp"
-        if ! $BB_STATIC printf '%s\n' "$NEWLINE" > "$TMPFILE"; then
-            $BB_STATIC rm -f "$TMPFILE"
-            fail "Cannot write command line: $CMDFILE"
+        LEN=`$BB_STATIC echo -n "$NEWLINE" | $BB_STATIC wc -c`
+        if [ "$LEN" -le 1023 ]; then
+            $BB_STATIC echo "$NEWLINE" > $CMDFILE
+        else
+            $BB_STATIC echo "2nd-boot: stock payload too long for $CMDFILE, skipping stock cmdline injection"
         fi
-        if ! $BB_STATIC mv -f "$TMPFILE" "$CMDFILE"; then
-            $BB_STATIC rm -f "$TMPFILE"
-            fail "Cannot replace command line: $CMDFILE"
-        fi
-    fi
-done
-
-echo "2nd-boot: preparation complete; unmounting filesystems"
+    done
+fi
 
 $BB_STATIC sync
 
