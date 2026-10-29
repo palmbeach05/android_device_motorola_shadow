@@ -28,8 +28,8 @@ fail()
 # Read the authoritative values from the running system's /proc/cmdline
 # (do NOT use ro.serialno / ro.boot.serialno / ro.ril.barcode / /pds, they
 # can be absent or hold stale/incorrect values) and forward only the
-# allowlisted stock tokens to both the normal and recovery hboot command
-# lines: androidboot.serialno, the final androidboot.bootloader (the stock
+# allowlisted stock tokens to the selected hboot command line:
+# androidboot.serialno, the final androidboot.bootloader (the stock
 # cmdline may list it more than once, e.g. androidboot.bootloader=0x0000
 # followed by androidboot.bootloader=3004; only the last one is authoritative),
 # and brdrev.
@@ -69,30 +69,34 @@ else
     "$BB_STATIC" echo "2nd-boot: missing or invalid brdrev in /proc/cmdline, skipping"
 fi
 
-# Validate both baselines even when no stock tokens can be forwarded.
-for CMDFILE in "$BOOT_DIR/cmdline" "$BOOT_DIR/cmdline-recovery"; do
-    [ -f "$CMDFILE" ] && [ -r "$CMDFILE" ] || fail "Cannot read $CMDFILE"
-    LC_ALL=C "$BB_STATIC" awk '
-        NR != 1 || length($0) > 1023 || $0 !~ /^[ -~]+$/ || $0 !~ /[^ ]/ { bad = 1 }
-        END { if (bad || NR != 1) exit 1 }
-    ' "$CMDFILE" || fail "Invalid command-line baseline: $CMDFILE"
-    BASELINE=`"$BB_STATIC" cat "$CMDFILE"` || fail "Cannot read $CMDFILE"
-    if [ -n "$PAYLOAD" ]; then
-        NEWLINE="$BASELINE$PAYLOAD"
-        LEN=`"$BB_STATIC" printf '%s' "$NEWLINE" | "$BB_STATIC" wc -c` ||
-            fail "Cannot measure command line: $CMDFILE"
-        [ "$LEN" -le 1023 ] || fail "Stock payload too long for $CMDFILE"
-        TMPFILE="$CMDFILE.tmp"
-        if ! "$BB_STATIC" printf '%s\n' "$NEWLINE" > "$TMPFILE"; then
-            "$BB_STATIC" rm -f "$TMPFILE"
-            fail "Cannot write command line: $CMDFILE"
-        fi
-        if ! "$BB_STATIC" mv -f "$TMPFILE" "$CMDFILE"; then
-            "$BB_STATIC" rm -f "$TMPFILE"
-            fail "Cannot replace command line: $CMDFILE"
-        fi
+if [ "$1" = "recovery" ]; then
+    CMDFILE="$BOOT_DIR/cmdline-recovery"
+else
+    CMDFILE="$BOOT_DIR/cmdline"
+fi
+
+# Validate the selected baseline even when no stock tokens can be forwarded.
+[ -f "$CMDFILE" ] && [ -r "$CMDFILE" ] || fail "Cannot read $CMDFILE"
+LC_ALL=C "$BB_STATIC" awk '
+    NR != 1 || length($0) > 1023 || $0 !~ /^[ -~]+$/ || $0 !~ /[^ ]/ { bad = 1 }
+    END { if (bad || NR != 1) exit 1 }
+' "$CMDFILE" || fail "Invalid command-line baseline: $CMDFILE"
+BASELINE=`"$BB_STATIC" cat "$CMDFILE"` || fail "Cannot read $CMDFILE"
+if [ -n "$PAYLOAD" ]; then
+    NEWLINE="$BASELINE$PAYLOAD"
+    LEN=`"$BB_STATIC" printf '%s' "$NEWLINE" | "$BB_STATIC" wc -c` ||
+        fail "Cannot measure command line: $CMDFILE"
+    [ "$LEN" -le 1023 ] || fail "Stock payload too long for $CMDFILE"
+    TMPFILE="$CMDFILE.tmp"
+    if ! "$BB_STATIC" printf '%s\n' "$NEWLINE" > "$TMPFILE"; then
+        "$BB_STATIC" rm -f "$TMPFILE"
+        fail "Cannot write command line: $CMDFILE"
     fi
-done
+    if ! "$BB_STATIC" mv -f "$TMPFILE" "$CMDFILE"; then
+        "$BB_STATIC" rm -f "$TMPFILE"
+        fail "Cannot replace command line: $CMDFILE"
+    fi
+fi
 
 echo "2nd-boot: preparation complete; unmounting filesystems"
 
