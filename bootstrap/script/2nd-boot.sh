@@ -44,9 +44,9 @@ is_valid_token() {
     $BB_STATIC echo "$1" | $BB_STATIC grep -Eq '^[A-Za-z0-9._-]+$'
 }
 
-SERIAL=`$BB_STATIC echo "$STOCK_CMDLINE" | $BB_STATIC grep -o 'androidboot\.serialno=[^ ]*' | $BB_STATIC tail -n1 | $BB_STATIC sed 's/^androidboot\.serialno=//'`
-BOOTLOADER=`$BB_STATIC echo "$STOCK_CMDLINE" | $BB_STATIC grep -o 'androidboot\.bootloader=[^ ]*' | $BB_STATIC tail -n1 | $BB_STATIC sed 's/^androidboot\.bootloader=//'`
-BRDREV=`$BB_STATIC echo "$STOCK_CMDLINE" | $BB_STATIC grep -o 'brdrev=[^ ]*' | $BB_STATIC tail -n1 | $BB_STATIC sed 's/^brdrev=//'`
+SERIAL=`$BB_STATIC echo "$STOCK_CMDLINE" | $BB_STATIC grep -Eo '(^| )androidboot\.serialno=[^ ]*' | $BB_STATIC tail -n1 | $BB_STATIC sed 's/^ *androidboot\.serialno=//'`
+BOOTLOADER=`$BB_STATIC echo "$STOCK_CMDLINE" | $BB_STATIC grep -Eo '(^| )androidboot\.bootloader=[^ ]*' | $BB_STATIC tail -n1 | $BB_STATIC sed 's/^ *androidboot\.bootloader=//'`
+BRDREV=`$BB_STATIC echo "$STOCK_CMDLINE" | $BB_STATIC grep -Eo '(^| )brdrev=[^ ]*' | $BB_STATIC tail -n1 | $BB_STATIC sed 's/^ *brdrev=//'`
 
 PAYLOAD=""
 
