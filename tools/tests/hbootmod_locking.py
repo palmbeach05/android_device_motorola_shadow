@@ -35,18 +35,17 @@ start = buffers.index('/*\n * The device exposes')
 end = buffers.index('static void init_abstract_buffer', start)
 buffers = buffers[:start] + buffers[end:]
 hboot = (source / 'hboot.c').read_text()
-uart = '\n'.join(re.findall(r'^#define (?:MMU_\w+|UART_CLOCK_BASE_RATE|UART_POLL_\w+)\s+\w+',
-                            hboot, re.MULTILINE)) + '\n'
-uart += function(hboot, 'static int emu_uart_divisor(int uart_speed, uint16_t *divisor)')
-uart += '\n' + function(hboot, 'static int uart_wait(uint32_t address, uint32_t mask, uint32_t ready)')
-uart += '\n' + function(hboot, 'int reconfigure_emu_uart(int uart_speed)')
+uart = hboot[hboot.index('#define MMU_48000000'):
+             hboot.index('int __attribute__((__naked__))')]
 boot = function(hboot, 'static int hboot_boot(int handle) ')
-# No disabled-interrupt code or assembly is compiled into the harness.
-boot = boot[:boot.index('\t/* Disable preempting */')] + '''
+# Keep the real preparation and cleanup, replacing only the hardware transition.
+start = boot.index('\t/* Disable preempting */')
+end = boot.index('\n\treturn -EBUSY;', start)
+boot = boot[:start] + """
     mock_transition(bootlist, listsize, boot_entry);
     free_high_pages((void *)l1_mem, 2);
-    return -EBUSY;
-}'''
+""" + boot[end:]
+route_header = without_includes((source / 'emu_uart.h').read_text())
 control = function(hboot, 'static int hbootctrl_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg) ')
 control += '\n' + function(hboot, 'static int hbootctrl_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos) ')
 mutex = re.search(r'^static DEFINE_MUTEX\(hbootctrl_mutex\);$', hboot, re.MULTILINE).group()
@@ -67,6 +66,8 @@ preamble = r'''
 #include <pthread.h>
 #include <sys/types.h>
 #define __user
+#define local_irq_save(flags) ((flags) = 0)
+#define local_irq_restore(flags) ((void)(flags))
 #define PAGE_SIZE 4096
 #define min(a,b) ((a) < (b) ? (a) : (b))
 #define KERN_INFO ""
@@ -78,22 +79,39 @@ struct file { loff_t f_pos; };
 #define DEFINE_MUTEX(name) pthread_mutex_t name = PTHREAD_MUTEX_INITIALIZER
 static pthread_mutex_t monitor = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t changed = PTHREAD_COND_INITIALIZER;
-static int attempts, completed, pause_at, paused, resume_op;
+static int attempts, completed, pause_at, reached_stage, resume_op, mutex_owned;
+static pthread_mutex_t hbootctrl_mutex;
+static pthread_t lock_owner, checkpoint_owner, snapshot_owner;
 static void mutex_lock(pthread_mutex_t *m)
 {
     pthread_mutex_lock(&monitor);
     ++attempts;
     pthread_cond_broadcast(&changed);
     pthread_mutex_unlock(&monitor);
-    assert(!pthread_mutex_lock(m));
+    assert(m == &hbootctrl_mutex && !pthread_mutex_lock(m));
+    pthread_mutex_lock(&monitor);
+    assert(!mutex_owned);
+    mutex_owned = 1;
+    lock_owner = pthread_self();
+    pthread_mutex_unlock(&monitor);
 }
-static void mutex_unlock(pthread_mutex_t *m) { assert(!pthread_mutex_unlock(m)); }
+static void mutex_unlock(pthread_mutex_t *m)
+{
+    pthread_mutex_lock(&monitor);
+    assert(m == &hbootctrl_mutex && mutex_owned);
+    assert(pthread_equal(lock_owner, pthread_self()));
+    mutex_owned = 0;
+    assert(!pthread_mutex_unlock(m));
+    pthread_mutex_unlock(&monitor);
+}
 static void checkpoint(int stage)
 {
     pthread_mutex_lock(&monitor);
     if (pause_at == stage) {
+        assert(mutex_owned && pthread_equal(lock_owner, checkpoint_owner));
+        assert(pthread_equal(checkpoint_owner, pthread_self()));
         pause_at = 0;
-        paused = 1;
+        reached_stage = stage;
         pthread_cond_broadcast(&changed);
         while (!resume_op) pthread_cond_wait(&changed, &monitor);
     }
@@ -119,45 +137,54 @@ static unsigned int mem_allocations, mem_frees;
 static unsigned int mem_attempts, page_attempts, l1_builds;
 static int fail_mem_after = -1, fail_chunk_after = -1;
 static int routing_status, display_status;
-struct mmio_event { char operation; uint32_t address, value; };
-static struct mmio_event mmio[128];
 static unsigned int mmio_count;
-/* Repeated busy reads and polling delays use counters, not trace entries. */
-static int poll_stage = -1, slow_stage = -1, test_output;
-static unsigned int ready_after, poll_reads[12], poll_delays, tx_position;
+struct uart_regs { uint32_t fclk, iclk, mdr1, lcr, efr, ier, dll, dlh; };
+static const struct uart_regs initial_uart = { 0x200, 0x900, 1, 0x1b, 0xa0, 0x5, 0x83, 0x13 };
+static struct uart_regs uart_regs;
+static int poll_stage = -1, slow_stage = -1;
+static unsigned int ready_after, poll_reads[2], poll_delays;
 static void poll_reset(int stage, unsigned int after)
 {
-    poll_stage = -1; slow_stage = stage; ready_after = after; test_output = 0;
+    poll_stage = -1; slow_stage = stage; ready_after = after;
     memset(poll_reads, 0, sizeof(poll_reads));
-    poll_delays = tx_position = mmio_count = 0;
+    poll_delays = mmio_count = 0;
+    uart_regs = initial_uart;
 }
-static void mmio_record(char operation, uint32_t address, uint32_t value)
+static uint32_t *__mock_reg(uint32_t address)
 {
-    assert(mmio_count < sizeof(mmio) / sizeof(mmio[0]));
-    mmio[mmio_count++] = (struct mmio_event){ operation, address, value };
+    switch (address) {
+    case 0xFA005000: return &uart_regs.fclk;
+    case 0xFA005010: return &uart_regs.iclk;
+    case 0xFB020020: return &uart_regs.mdr1;
+    case 0xFB02000C: return &uart_regs.lcr;
+    case 0xFB020008:
+        assert(uart_regs.lcr == 0xbf);
+        return &uart_regs.efr;
+    case 0xFB020000:
+        assert(uart_regs.lcr == 0xbf);
+        return &uart_regs.dll;
+    case 0xFB020004:
+        return uart_regs.lcr == 0xbf ? &uart_regs.dlh : &uart_regs.ier;
+    default: assert(0 && "unexpected UART register access"); return NULL;
+    }
 }
 static uint32_t __raw_readl(uint32_t address)
 {
-    uint32_t value = address == 0xFB020058 ? 1 :
-                     address == 0xFB020044 ? 0 : 0x100;
-    if (address == 0xFB020058 || address == 0xFB020044) {
-        unsigned int stage = address == 0xFB020058 ? 0 : tx_position;
-        poll_stage = stage;
-        ++poll_reads[stage];
-        if ((int)stage == slow_stage && poll_reads[stage] <= ready_after)
-            return address == 0xFB020058 ? 0 : 1;
+    if (address == 0xFB020058 || address == 0xFB020014) {
+        poll_stage = address == 0xFB020058 ? 0 : 1;
+        ++poll_reads[poll_stage];
+        if (poll_stage == slow_stage && poll_reads[poll_stage] <= ready_after)
+            return 0;
+        return poll_stage == 0 ? 1 : 0x60;
     }
-    mmio_record('r', address, value);
-    return value;
+    ++mmio_count;
+    return *__mock_reg(address);
 }
 static void __raw_writel(uint32_t value, uint32_t address)
 {
-    if (address == 0xFB020054) { test_output = 0; tx_position = 0; }
-    if (address == 0xFB020000 && test_output) ++tx_position;
-    mmio_record('w', address, value);
+    ++mmio_count;
+    *__mock_reg(address) = value;
 }
-static void msleep(unsigned int duration)
-{ test_output = 1; tx_position = 0; mmio_record('s', 0, duration); }
 static void udelay(unsigned int duration)
 {
     assert(duration == 1000 && poll_stage >= 0);
@@ -194,11 +221,20 @@ static uint32_t get_high_pages(unsigned int order)
 }
 static void free_high_pages(void *p, unsigned int order) { (void)order; ++page_frees; free((char *)p - (misalign_pages ? 4 : 0)); }
 static void build_l1_table(uint32_t *table) { (void)table; ++l1_builds; }
-static pthread_mutex_t hbootctrl_mutex;
-static int hboot_activate_emu_uart(void)
+static unsigned int route_rollbacks, route_commits;
+int hboot_activate_emu_uart(struct hboot_uart_route *route)
 {
     assert(pthread_mutex_trylock(&hbootctrl_mutex) == EBUSY);
-    ++routing; checkpoint(5); return routing_status;
+    ++routing; checkpoint(5);
+    if (!routing_status) route->writes_attempted = 2;
+    return routing_status;
+}
+void hboot_finish_emu_uart(struct hboot_uart_route *route, int keep)
+{
+    assert(route->writes_attempted == 2);
+    route->writes_attempted = 0;
+    if (keep) ++route_commits;
+    else ++route_rollbacks;
 }
 static int disable_dss(void)
 {
@@ -263,7 +299,7 @@ static void mock_transition(void *list, uint32_t count, bootfunc_t entry)
         assert(count == (uint32_t)expected);
         verify_reuse = 0;
     }
-    if (verify_snapshot) {
+    if (verify_snapshot && pthread_equal(snapshot_owner, pthread_self())) {
         struct abstract_buffer *a;
         assert(count == 1);
         a = (void *)((uint32_t *)list)[0];
@@ -302,66 +338,35 @@ static int alloc(int type, int size, int attrs)
 }
 static void reset(void)
 {
-    int i;
-    for (i = 0; i < buffers.used; ++i)
-        if (buffers.bufs[i].container.generic) assert(!ioctl_op(&first, HBOOT_FREE_BUFFER, i));
     buffers_destroy();
-    memset(&buffers, 0, sizeof(buffers));
+    assert(mem_allocations == mem_frees && page_allocations == page_frees);
+    assert(buffers.used == 0 && buffers.handle == INVALID_BUFFER_HANDLE);
+    assert(!buffers.bootlist);
     assert(!buffers_init());
     first.f_pos = second.f_pos = 0;
 }
-/* Compare every read, write and wait to the existing UART programming sequence. */
 static void uart_programming(int rate, uint16_t divisor)
 {
-    struct mmio_event actual[128];
-    unsigned int count, i;
-    const char characters[] = "hbootmod!\r\n";
+    struct uart3_state state;
     uint16_t checked = 0;
     assert(!emu_uart_divisor(rate, &checked) && checked == divisor);
     poll_reset(-1, 0);
-    assert(!reconfigure_emu_uart(rate));
-    count = mmio_count;
-    memcpy(actual, mmio, sizeof(actual));
-    mmio_count = 0;
-    mmio_record('r', MMU_CM_FCLKEN_PER, 0x100);
-    mmio_record('w', MMU_CM_FCLKEN_PER, 0x900);
-    mmio_record('r', MMU_CM_ICLKEN_PER, 0x100);
-    mmio_record('w', MMU_CM_ICLKEN_PER, 0x900);
-    mmio_record('r', MMU_UART3_BASE + 0x54, 0x100);
-    mmio_record('w', MMU_UART3_BASE + 0x54, 0x102);
-    mmio_record('r', MMU_UART3_BASE + 0x58, 1);
-    mmio_record('r', MMU_UART3_BASE + 0x20, 0x100);
-    mmio_record('w', MMU_UART3_BASE + 0x20, 0x107);
-    mmio_record('r', MMU_UART3_BASE + 0x0C, 0x100);
-    mmio_record('w', MMU_UART3_BASE + 0x0C, 0xBF);
-    mmio_record('r', MMU_UART3_BASE + 0x08, 0x100);
-    mmio_record('w', MMU_UART3_BASE + 0x08, 0x110);
-    mmio_record('w', MMU_UART3_BASE + 0x0C, 0);
-    mmio_record('r', MMU_UART3_BASE + 0x04, 0x100);
-    mmio_record('w', MMU_UART3_BASE + 0x04, 0);
-    mmio_record('w', MMU_UART3_BASE + 0x0C, 0x80);
-    mmio_record('w', MMU_UART3_BASE + 0x08, 6);
-    mmio_record('w', MMU_UART3_BASE + 0x0C, 0xBF);
-    mmio_record('w', MMU_UART3_BASE + 0x00, divisor & 0xFF);
-    mmio_record('w', MMU_UART3_BASE + 0x04, divisor >> 8);
-    mmio_record('w', MMU_UART3_BASE + 0x0C, 0xBF);
-    mmio_record('w', MMU_UART3_BASE + 0x08, 0);
-    mmio_record('w', MMU_UART3_BASE + 0x0C, 3);
-    mmio_record('w', MMU_UART3_BASE + 0x20, 0);
-    mmio_record('s', 0, 1);
-    for (i = 0; i < sizeof(characters) - 1; ++i) {
-        mmio_record('w', MMU_UART3_BASE, characters[i]);
-        mmio_record('r', MMU_UART3_BASE + 0x44, 0);
-    }
-    assert(count == mmio_count);
-    for (i = 0; i < count; ++i) {
-        assert(actual[i].operation == mmio[i].operation);
-        assert(actual[i].address == mmio[i].address);
-        assert(actual[i].value == mmio[i].value);
-    }
+    assert(!reconfigure_emu_uart(rate, &state));
+    assert(uart_regs.fclk == (initial_uart.fclk | UART3_CLOCK_BIT));
+    assert(uart_regs.iclk == (initial_uart.iclk | UART3_CLOCK_BIT));
+    assert(uart_regs.dll == (divisor & 0xff) && uart_regs.dlh == divisor >> 8);
+    assert(uart_regs.mdr1 == 0 && uart_regs.lcr == 3);
+    assert(uart_regs.efr == 0 && uart_regs.ier == 0);
+    /* Unrelated clock bits may change during preparation. */
+    uart_regs.fclk |= 2;
+    restore_uart3(&state);
+    assert(uart_regs.fclk == (initial_uart.fclk | 2));
+    uart_regs.fclk &= ~2;
+    assert(!memcmp(&uart_regs, &initial_uart, sizeof(uart_regs)));
 }
 static void uart_rates(void)
 {
+    struct uart3_state state;
     /* Integer rates jump across the 14-bit limit between 182 and 183 baud;
      * none yields exactly 0x3FFF with the existing clock constant. */
     const int invalid[] = { -1, INT_MIN, 1, 181, 182, 2995201, INT_MAX };
@@ -375,7 +380,7 @@ static void uart_rates(void)
         struct abstract_buffer before = *buffers.bufs[1].container.abstract;
         emu_uart = invalid[i];
         allocations = routing = display = transitions = mmio_count = 0;
-        assert(reconfigure_emu_uart(emu_uart) == -EINVAL);
+        assert(reconfigure_emu_uart(emu_uart, &state) == -EINVAL);
         assert(!mmio_count);
         assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EINVAL);
         assert(!allocations && !routing && !display && !transitions && !mmio_count);
@@ -384,7 +389,7 @@ static void uart_rates(void)
         pthread_mutex_unlock(&hbootctrl_mutex);
     }
     mmio_count = 0;
-    assert(reconfigure_emu_uart(0) == -EINVAL);
+    assert(reconfigure_emu_uart(0, &state) == -EINVAL);
     assert(!mmio_count);
     emu_uart = 0;
     assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EBUSY);
@@ -400,71 +405,39 @@ static void uart_rates(void)
     }
     emu_uart = 115200;
 }
-/* Poll the production helper at every reset/transmit stage. Busy observations
- * are counted separately so the successful-path trace stays small and useful. */
+/* Test both readiness polls at and beyond the timeout boundary. */
 static void uart_polling(void)
 {
-    struct mmio_event successful[128];
-    unsigned int stage, i, delays, budget;
-    unsigned int successful_count;
+    struct uart3_state state;
+    unsigned int stage, budget = UART_POLL_TIMEOUT_US / UART_POLL_DELAY_US;
     reset();
     assert(alloc(B_TYPE_PLAIN, 8, 0) == 0);
     emu_uart = 115200;
     kill_dss = 1;
-    poll_reset(-1, 0);
-    assert(!reconfigure_emu_uart(emu_uart));
-    successful_count = mmio_count;
-    memcpy(successful, mmio, sizeof(successful));
-    assert(!poll_delays);
-    budget = UART_POLL_TIMEOUT_US / UART_POLL_DELAY_US;
-    assert(budget && budget * UART_POLL_DELAY_US == UART_POLL_TIMEOUT_US);
-    for (stage = 0; stage < 12; ++stage) {
-        /* Both ordinary delayed readiness and the final allowed observation. */
-        for (delays = 2; ; delays = budget) {
-            poll_reset(stage, delays);
-            assert(!reconfigure_emu_uart(emu_uart));
-            assert(poll_reads[stage] == delays + 1 && poll_delays == delays);
-            assert(mmio_count == successful_count);
-            for (i = 0; i < mmio_count; ++i) {
-                assert(mmio[i].operation == successful[i].operation);
-                assert(mmio[i].address == successful[i].address);
-                assert(mmio[i].value == successful[i].value);
-            }
-            if (delays == budget) break;
-        }
-        {
-            unsigned int allocated = page_allocations, freed = page_frees;
-            unsigned int prefix = stage ? 26 + 2 * (stage - 1) + 1 : 6;
-            poll_reset(stage, UINT_MAX);
-            allocations = routing = display = transitions = 0;
-            assert(ioctl_op(&first, HBOOT_BOOT, 0) == -ETIMEDOUT);
-            assert(page_allocations == allocated + 1 && page_frees == freed + 1);
-            assert(page_allocations == page_frees);
-            assert(allocations == 1 && routing == 1 && !display && !transitions);
-            assert(poll_reads[stage] == budget + 1 && poll_delays == budget);
-            for (i = 0; i < stage; ++i) assert(poll_reads[i] == 1);
-            for (i = stage + 1; i < 12; ++i) assert(!poll_reads[i]);
-            /* Exact prefix: no later writes, characters or preparation. */
-            assert(mmio_count == prefix);
-            for (i = 0; i < prefix; ++i) {
-                assert(mmio[i].operation == successful[i].operation);
-                assert(mmio[i].address == successful[i].address);
-                assert(mmio[i].value == successful[i].value);
-            }
-            assert(!pthread_mutex_trylock(&hbootctrl_mutex));
-            pthread_mutex_unlock(&hbootctrl_mutex);
-            assert(!ioctl_op(&first, HBOOT_SELECT_BUFFER, 0));
-        }
+    for (stage = 0; stage < 2; ++stage) {
+        unsigned int allocated = page_allocations, freed = page_frees;
+        unsigned int rolled_back = route_rollbacks;
+        poll_reset(stage, budget);
+        assert(!reconfigure_emu_uart(emu_uart, &state));
+        assert(poll_reads[stage] == budget + 1 && poll_delays == budget);
+        poll_reset(stage, UINT_MAX);
+        allocations = routing = display = transitions = 0;
+        assert(ioctl_op(&first, HBOOT_BOOT, 0) == -ETIMEDOUT);
+        assert(page_allocations == allocated + 1 && page_frees == freed + 1);
+        assert(allocations == 1 && routing == 1 && !display && !transitions);
+        assert(route_rollbacks == rolled_back + 1);
+        assert(!memcmp(&uart_regs, &initial_uart, sizeof(uart_regs)));
+        assert(poll_reads[stage] == budget + 1 && poll_delays == budget);
+        assert(poll_reads[1 - stage] == stage);
+        assert(!pthread_mutex_trylock(&hbootctrl_mutex));
+        pthread_mutex_unlock(&hbootctrl_mutex);
     }
-    /* Disabled preparation bypasses even a stuck reset condition. */
     emu_uart = 0;
     poll_reset(0, UINT_MAX);
     routing = display = transitions = 0;
     assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EBUSY);
     assert(!routing && display == 1 && transitions == 1 && !mmio_count);
-    assert(!poll_delays);
-    for (i = 0; i < 12; ++i) assert(!poll_reads[i]);
-    /* Later mock success demonstrates control flow only, not hardware recovery. */
+    assert(!poll_reads[0] && !poll_reads[1] && !poll_delays);
     poll_reset(-1, 0);
     emu_uart = 115200;
     assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EBUSY);
@@ -519,6 +492,8 @@ static void display_errors(void)
         for (i = 0; i < sizeof(errors) / sizeof(errors[0]); ++i) {
             unsigned int allocated = page_allocations, freed = page_frees;
             allocations = routing = display = transitions = mmio_count = 0;
+            unsigned int rolled_back = route_rollbacks, committed = route_commits;
+            poll_reset(-1, 0);
             display_status = errors[i];
             assert(ioctl_op(&first, HBOOT_BOOT, 0) == errors[i]);
             assert(page_allocations == allocated + 1 && page_frees == freed + 1);
@@ -526,6 +501,8 @@ static void display_errors(void)
             assert(allocations == 1 && routing == (unsigned int)uart_enabled);
             assert(display == 1 && !transitions);
             assert(!!mmio_count == uart_enabled);
+            assert(route_rollbacks == rolled_back + uart_enabled && route_commits == committed);
+            assert(!memcmp(&uart_regs, &initial_uart, sizeof(uart_regs)));
             assert(!pthread_mutex_trylock(&hbootctrl_mutex));
             pthread_mutex_unlock(&hbootctrl_mutex);
         }
@@ -567,7 +544,7 @@ struct edge_snapshot {
     char payload[MAX_BUFFERS_COUNT][CHUNK_SIZE + 17];
     uint32_t bootlist[MAX_BUFFERS_COUNT];
     loff_t first_pos, second_pos;
-    unsigned int counters[14], reads[12];
+    unsigned int counters[14], reads[2];
     size_t budget;
 };
 static void edge_counters(unsigned int *values)
@@ -792,7 +769,7 @@ static void rejected_boot(int handle, void *original_payload)
             assert(!allocations && mem_attempts == mem_before && page_attempts == pages_before);
             assert(mem_frees == mem_freed && page_frees == pages_freed && l1_builds == built);
             assert(!routing && !display && !transitions && !mmio_count && !poll_delays);
-            for (i = 0; i < 12; ++i) assert(!poll_reads[i]);
+            for (i = 0; i < 2; ++i) assert(!poll_reads[i]);
             assert(!memcmp(&before, &buffers, sizeof(before)));
             assert(!memcmp(bootlist, buffers.bootlist, sizeof(bootlist)));
             assert(first.f_pos == first_pos && second.f_pos == second_pos);
@@ -1151,6 +1128,7 @@ static void *worker(void *arg)
     job->result = job->write ? hbootctrl_write(&f, "abcdefgh", 8, &f.f_pos) :
                              ioctl_op(&f, job->cmd, job->arg);
     pthread_mutex_lock(&monitor);
+    assert(!verify_snapshot || !pthread_equal(snapshot_owner, pthread_self()));
     ++completed;
     pthread_cond_broadcast(&changed);
     pthread_mutex_unlock(&monitor);
@@ -1163,11 +1141,12 @@ static int race(int stage, struct job owner, struct job *others, int count)
     pthread_t threads[5];
     int i, baseline;
     pthread_mutex_lock(&monitor);
-    pause_at = stage; paused = resume_op = completed = 0;
-    pthread_mutex_unlock(&monitor);
+    pause_at = stage; reached_stage = resume_op = completed = 0;
     assert(!pthread_create(&threads[0], NULL, worker, &owner));
-    pthread_mutex_lock(&monitor);
-    while (!paused) pthread_cond_wait(&changed, &monitor);
+    checkpoint_owner = threads[0];
+    if (verify_snapshot) snapshot_owner = threads[0];
+    while (!reached_stage && !completed) pthread_cond_wait(&changed, &monitor);
+    assert(reached_stage == stage && !completed);
     baseline = attempts;
     pthread_mutex_unlock(&monitor);
     for (i = 0; i < count; ++i)
@@ -1180,6 +1159,7 @@ static int race(int stage, struct job owner, struct job *others, int count)
     pthread_mutex_unlock(&monitor);
     for (i = 0; i <= count; ++i) assert(!pthread_join(threads[i], NULL));
     assert(completed == count + 1);
+    assert(!verify_snapshot);
     return owner.result;
 }
 /* Snapshot live handles, allocations and payloads across every replacement. */
@@ -1707,16 +1687,17 @@ int main(void)
             assert(buffers.handle == INVALID_BUFFER_HANDLE);
             assert(hbootctrl_write(&second, "abcdefgh", 8, &second.f_pos) == -EINVAL);
             assert(second.f_pos == 0);
-        } else race(stage, boot, contenders, 4);
+        } else assert(race(stage, boot, contenders, 4) == -EBUSY);
     }
     reset();
     assert(alloc(B_TYPE_PLAIN, 8, 0) == 0);
     assert(alloc(B_TYPE_PLAIN, 8, B_ATTR_VERIFY) == 1);
     ioctl_op(&first, HBOOT_SELECT_BUFFER, 1);
     assert(hbootctrl_write(&first, "abcdefgh", 8, &first.f_pos) == 8);
+    snapshot_owner = pthread_self();
     verify_snapshot = 1;
     assert(ioctl_op(&first, HBOOT_BOOT, 0) == -EBUSY);
-    verify_snapshot = 0;
+    assert(!verify_snapshot);
     /* Every preparation error must leave the mutex available. */
     fail_pages = 1;
     assert(ioctl_op(&first, HBOOT_BOOT, 0) == -ENOMEM);
@@ -1743,7 +1724,7 @@ with tempfile.TemporaryDirectory(prefix='hbootmod-locking-') as directory:
     executable = Path(directory) / 'locking'
     for verify in (True, False):
         configuration = '#define HBOOT_VERIFY_CRC32\n' if verify else ''
-        test_source.write_text(configuration + preamble + uart + '\n' + header + crc + buffers + '\n' + mutex +
+        test_source.write_text(configuration + route_header + preamble + uart + '\n' + header + crc + buffers + '\n' + mutex +
                                '\n' + mock + boot + '\n' + control + tests)
         subprocess.run([os.environ.get('CC', 'cc'), '-m32', '-std=gnu99', '-pthread',
                         '-Wall', '-Wextra', '-Wno-unused-parameter',

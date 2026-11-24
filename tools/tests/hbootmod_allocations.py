@@ -28,6 +28,7 @@ static struct allocation allocations[1024];
 static unsigned int used, calls, succeed_at, fail_at, bookkeeping_calls;
 static int want_bookkeeping, fail_bookkeeping;
 static void *bookkeeping;
+static unsigned long accepted_address;
 static unsigned int get_order(size_t size)
 {
     unsigned int order = 0;
@@ -44,6 +45,7 @@ static unsigned long allocate(int pages, unsigned int order)
     a = &allocations[used++];
     a->address = (calls == succeed_at ? 0x90000000UL : 0x80000000UL)
                  + used * 0x10000UL;
+    if (calls == succeed_at) accepted_address = a->address;
     a->pages = pages;
     a->order = order;
     a->freed = 0;
@@ -110,11 +112,13 @@ static void scenario(int pages, unsigned int order, size_t size,
     used = calls = bookkeeping_calls = 0;
     want_bookkeeping = 0;
     succeed_at = success;
+    accepted_address = 0;
     fail_at = failure;
     fail_bookkeeping = book_failure;
     result = pages ? get_high_pages(order) : get_high_mem(size);
     assert(calls == expected_calls);
     assert(!!result == expected_success);
+    assert(result == accepted_address);
     assert(bookkeeping == NULL);
     assert(bookkeeping_calls <= 1);
     for (i = 0; i < used; ++i)

@@ -273,7 +273,32 @@ static int find_device(struct device *dev, void *data)
 	return 0;
 }
 
-int hboot_activate_emu_uart(void)
+void hboot_finish_emu_uart(struct hboot_uart_route *route, int keep)
+{
+	int i, ret;
+
+	if (!keep) {
+		/* A failed SPI write may have reached CPCAP. Restore it too. */
+		if (route->writes_attempted >= 2) {
+			ret = cpcap_config_for_write(route->spi, 411, route->route_411);
+			if (ret)
+				printk(KERN_ERR "UART rollback: CPCAP 411 restore failed: %d\n", ret);
+		}
+		ret = cpcap_config_for_write(route->spi, 897, route->route_897);
+		if (ret)
+			printk(KERN_ERR "UART rollback: CPCAP 897 restore failed: %d\n", ret);
+
+		for (i = 0; i < HBOOT_ULPI_PADS; ++i)
+			omap_writew(route->ulpi[i], OMAP343X_CTRL_BASE + 0x1A2 + 2 * i);
+		omap_writew(route->uart_rx, OMAP343X_CTRL_BASE + 0x19E);
+	} else {
+		printk(KERN_ALERT "WARNING: MiniUSB port works in UART3 mode, "
+		       "the USB functionality UNAVAILABLE!\n");
+	}
+	put_device(route->cpcap);
+}
+
+int hboot_activate_emu_uart(struct hboot_uart_route *route)
 {
 	int i;
 	int ret = -ENODEV;
@@ -310,27 +335,43 @@ int hboot_activate_emu_uart(void)
 	}
 	printk(KERN_ALERT "Reading CPCAP vendor_version: 0x%04X\n", tmp);
 
+	ret = cpcap_config_for_read(spi, 897, &route->route_897);
+	if (!ret)
+		ret = cpcap_config_for_read(spi, 411, &route->route_411);
+	if (ret) {
+		printk(KERN_ERR "UART preparation: CPCAP routing read failed: %d\n", ret);
+		goto out_put_device;
+	}
+
+	route->cpcap = cpcap;
+	route->spi = spi;
+	route->uart_rx = omap_readw(OMAP343X_CTRL_BASE + 0x19E);
+	for (i = 0; i < HBOOT_ULPI_PADS; ++i)
+		route->ulpi[i] = omap_readw(OMAP343X_CTRL_BASE + 0x1A2 + 2 * i);
+
 	/*
 	 * Step 1:
 	 * Configure OMAP SCM to set all ULPI pin of USB OTG to SAFE MODE
 	 */
-	for (i = 0; i < 0x18; i += 2)
-		write_omap_mux_register(0x1A2 + i, 7, 0);
+	for (i = 0; i < HBOOT_ULPI_PADS; ++i)
+		write_omap_mux_register(0x1A2 + 2 * i, 7, 0);
 
 	/*
 	 * Step 2:
 	 * Configure CPCAP to route UART3 to USB port; Switch VBUSIN to supply
 	 * UART/USB transeiver and set VBUS standby mode 3
 	 */
+	route->writes_attempted = 1;
 	ret = cpcap_config_for_write(spi, 897, 0x0101);
 	if (ret) {
 		printk(KERN_ERR "UART preparation: CPCAP routing write 897 failed: %d\n", ret);
-		goto out_put_device;
+		goto out_restore;
 	}
+	route->writes_attempted = 2;
 	ret = cpcap_config_for_write(spi, 411, 0x014C);
 	if (ret) {
 		printk(KERN_ERR "UART preparation: CPCAP routing write 411 failed: %d\n", ret);
-		goto out_put_device;
+		goto out_restore;
 	}
 
 	/* Step 3:
@@ -346,8 +387,11 @@ int hboot_activate_emu_uart(void)
 	write_omap_mux_register(0x1AA, 2, 0);
 	write_omap_mux_register(0x1AC, 2, 1);
 
-	printk(KERN_ALERT "WARNING: MiniUSB port works in UART3 mode, "
-	       "the USB functionality UNAVAILABLE!\n");
+	return 0;
+
+out_restore:
+	hboot_finish_emu_uart(route, 0);
+	return ret;
 
 out_put_device:
 	put_device(cpcap);

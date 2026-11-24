@@ -71,96 +71,93 @@ static int uart_wait(uint32_t address, uint32_t mask, uint32_t ready)
 	}
 }
 
-/* We have MMU enabled, so pick the virt. address */
-int reconfigure_emu_uart(int uart_speed)
+/* UART3's clock bits share registers with other peripherals. */
+#define UART3_CLOCK_BIT		0x0800
+#define UART3_REG(offset)	(MMU_UART3_BASE + (offset))
+
+struct uart3_state {
+	uint32_t fclk, iclk;
+	uint32_t mdr1, lcr, efr, ier, dll, dlh;
+	int configured;
+};
+
+static void restore_uart3(const struct uart3_state *state)
 {
-	uint32_t lcr;
-	uint32_t efr;
-	uint32_t mdr1;
-	uint32_t ier;
-	uint32_t dlh, dll;
+	unsigned long flags;
+
+	local_irq_save(flags);
+	if (state->configured) {
+		__raw_writel(0x07, UART3_REG(0x20)); /* Disable UART mode */
+		__raw_writel(0xBF, UART3_REG(0x0C));
+		__raw_writel(state->dll, UART3_REG(0x00));
+		__raw_writel(state->dlh, UART3_REG(0x04));
+		__raw_writel(state->efr | (1 << 4), UART3_REG(0x08));
+		__raw_writel(0x00, UART3_REG(0x0C));
+		__raw_writel(state->ier, UART3_REG(0x04));
+		__raw_writel(0xBF, UART3_REG(0x0C));
+		__raw_writel(state->efr, UART3_REG(0x08));
+		__raw_writel(state->lcr, UART3_REG(0x0C));
+		__raw_writel(state->mdr1, UART3_REG(0x20));
+	}
+	__raw_writel((__raw_readl(MMU_CM_ICLKEN_PER) & ~UART3_CLOCK_BIT) |
+		     state->iclk, MMU_CM_ICLKEN_PER);
+	__raw_writel((__raw_readl(MMU_CM_FCLKEN_PER) & ~UART3_CLOCK_BIT) |
+		     state->fclk, MMU_CM_FCLKEN_PER);
+	local_irq_restore(flags);
+}
+
+static int reconfigure_emu_uart(int uart_speed, struct uart3_state *state)
+{
+	unsigned long flags;
+	uint32_t fclk, iclk;
 	uint16_t div;
-	const char characters[] = "hbootmod!\r\n";
-	unsigned int i;
 	int ret;
 
 	if (emu_uart_divisor(uart_speed, &div))
 		return -EINVAL;
 
-	printk(KERN_INFO CTRL_DEVNAME ": Enabling clocks for UART3\n");
-	__raw_writel(__raw_readl(MMU_CM_FCLKEN_PER) | 0x0800, MMU_CM_FCLKEN_PER);
-	__raw_writel(__raw_readl(MMU_CM_ICLKEN_PER) | 0x0800, MMU_CM_ICLKEN_PER);
+	local_irq_save(flags);
+	fclk = __raw_readl(MMU_CM_FCLKEN_PER);
+	iclk = __raw_readl(MMU_CM_ICLKEN_PER);
+	state->fclk = fclk & UART3_CLOCK_BIT;
+	state->iclk = iclk & UART3_CLOCK_BIT;
+	state->configured = 0;
+	__raw_writel(fclk | UART3_CLOCK_BIT, MMU_CM_FCLKEN_PER);
+	__raw_writel(iclk | UART3_CLOCK_BIT, MMU_CM_ICLKEN_PER);
+	local_irq_restore(flags);
 
-	printk(KERN_INFO CTRL_DEVNAME ": Configuring UART3 on 0x%08X\n",
-	       MMU_UART3_BASE);
-
-	__raw_writel(__raw_readl(MMU_UART3_BASE + 0x54) | 0x02,
-		     MMU_UART3_BASE + 0x54); //reset uart
-	ret = uart_wait(MMU_UART3_BASE + 0x58, 1, 1);
+	/* Wait for reset completion and an idle transmitter. A soft reset or
+	 * FIFO clear would discard state we cannot restore on failure. */
+	ret = uart_wait(UART3_REG(0x58), 1, 1);
+	if (!ret)
+		ret = uart_wait(UART3_REG(0x14), 0x60, 0x60);
 	if (ret) {
-		printk(KERN_ERR CTRL_DEVNAME ": UART3 reset timed out\n");
+		restore_uart3(state);
+		printk(KERN_ERR CTRL_DEVNAME ": UART3 did not become ready\n");
 		return ret;
 	}
 
-	mdr1 = __raw_readl(MMU_UART3_BASE + 0x20);
-	__raw_writel(mdr1 | 0x07, MMU_UART3_BASE + 0x20);
-
-	lcr = __raw_readl(MMU_UART3_BASE + 0x0C);
-	__raw_writel(0xBF, MMU_UART3_BASE + 0x0C);
-
-	efr = __raw_readl(MMU_UART3_BASE + 0x08);
-	__raw_writel(efr | (1 << 4), MMU_UART3_BASE + 0x08);
-
-	__raw_writel(0x00, MMU_UART3_BASE + 0x0C);
-	ier = __raw_readl(MMU_UART3_BASE + 0x04);
-	__raw_writel(0x00, MMU_UART3_BASE + 0x04); /* Disable IRQs */
-
-	__raw_writel(0x80, MMU_UART3_BASE + 0x0C);
-	__raw_writel(0x06, MMU_UART3_BASE + 0x08); /* Disable FIFO */
-
-	__raw_writel(0xBF, MMU_UART3_BASE + 0x0C);
-
-	/* Clock divisor
-	 *
-	 * Determined based on uart_speed parameter:
-	 * UART_CLOCK_BASE_RATE / speed (i.e 0x1A for 115200 etc.)
-	 */
-
-	dll = div & 0xFF;
-	dlh = (div >> 8) & 0x3F;
-
-	/* It's 14 bit
-	 * 8 LSB bits goes to 0x00 register
-	 * 6 MSB bits goes to 0x04 register
-	 */
-
-	__raw_writel(dll, MMU_UART3_BASE + 0x00);
-	__raw_writel(dlh, MMU_UART3_BASE + 0x04);
-
-	__raw_writel(0xBF, MMU_UART3_BASE + 0x0C);
-	__raw_writel(0x00, MMU_UART3_BASE + 0x08);
-	__raw_writel(0x03, MMU_UART3_BASE + 0x0C);
-	__raw_writel(0x00, MMU_UART3_BASE + 0x20);
-
-	printk(KERN_INFO CTRL_DEVNAME ": UART3 configured for %u baudrate (div = 0x%04x).\n",
-	       (unsigned int)uart_speed, div);
-	printk(KERN_INFO CTRL_DEVNAME ": UART3 registers: lcr[0x%4X], efr[0x%4X], mdr1[0x%4x], ier[0x%4X], dll[0x%4x], dlh[0x%4x]\n",
-	       lcr, efr, mdr1, ier, dll, dlh);
-
-	/* Wait for it to be ready */
-	msleep(1);
-
-	/* Test it; preserve the existing transmit-status interpretation. */
-	for (i = 0; i < sizeof(characters) - 1; ++i) {
-		__raw_writel(characters[i], MMU_UART3_BASE + 0x00);
-		ret = uart_wait(MMU_UART3_BASE + 0x44, 1, 0);
-		if (ret) {
-			printk(KERN_ERR CTRL_DEVNAME
-			       ": UART3 transmit timed out at character %u (0x%02x)\n",
-			       i, (unsigned int)characters[i]);
-			return ret;
-		}
-	}
+	/* Keep interrupt handlers away from the banked registers. */
+	local_irq_save(flags);
+	state->lcr = __raw_readl(UART3_REG(0x0C));
+	state->mdr1 = __raw_readl(UART3_REG(0x20));
+	__raw_writel(0x07, UART3_REG(0x20));
+	__raw_writel(0xBF, UART3_REG(0x0C));
+	state->efr = __raw_readl(UART3_REG(0x08));
+	state->dll = __raw_readl(UART3_REG(0x00));
+	state->dlh = __raw_readl(UART3_REG(0x04));
+	__raw_writel(div & 0xFF, UART3_REG(0x00));
+	__raw_writel(div >> 8, UART3_REG(0x04));
+	__raw_writel(state->efr | (1 << 4), UART3_REG(0x08));
+	__raw_writel(0x00, UART3_REG(0x0C));
+	state->ier = __raw_readl(UART3_REG(0x04));
+	__raw_writel(0x00, UART3_REG(0x04)); /* Disable IRQs */
+	__raw_writel(0xBF, UART3_REG(0x0C));
+	__raw_writel(0x00, UART3_REG(0x08)); /* Disable flow control */
+	__raw_writel(0x03, UART3_REG(0x0C)); /* 8N1 */
+	__raw_writel(0x00, UART3_REG(0x20)); /* UART 16x */
+	state->configured = 1;
+	local_irq_restore(flags);
 	return 0;
 }
 
@@ -304,6 +301,8 @@ static int hboot_boot(int handle)
 	uint32_t bootsize, listsize;
 	void *bootlist;
 	uint32_t l1_mem, *l1_table;
+	struct hboot_uart_route route;
+	struct uart3_state uart_state;
 	uint16_t uart_divisor;
 	int ret;
 
@@ -338,28 +337,28 @@ static int hboot_boot(int handle)
 		return -ENOMEM;
 	}
 
-	/* UART - if desired */
 	if (emu_uart) {
-		ret = hboot_activate_emu_uart();
-		if (ret) {
-			free_high_pages((void *)l1_mem, 2);
-			return ret;
-		}
-		ret = reconfigure_emu_uart(emu_uart);
-		if (ret) {
-			free_high_pages((void *)l1_mem, 2);
-			return ret;
-		}
+		ret = hboot_activate_emu_uart(&route);
+		if (ret)
+			goto out_free_l1;
+		ret = reconfigure_emu_uart(emu_uart, &uart_state);
+		if (ret)
+			goto out_restore_route;
 	}
 
 	/* Disable dss, some defy want it. */
 	if (kill_dss) {
 		ret = disable_dss();
 		if (ret) {
-			free_high_pages((void *)l1_mem, 2);
-			return ret;
+			if (!emu_uart)
+				goto out_free_l1;
+			restore_uart3(&uart_state);
+			goto out_restore_route;
 		}
 	}
+
+	if (emu_uart)
+		hboot_finish_emu_uart(&route, 1);
 
 	/* Disable preempting */
 	preempt_disable();
@@ -370,6 +369,12 @@ static int hboot_boot(int handle)
 		  emu_uart, bi_powerup_reason(), bi_battery_status_at_boot(),
 		  bi_cid_recover_boot());
 	return -EBUSY;
+
+out_restore_route:
+	hboot_finish_emu_uart(&route, 0);
+out_free_l1:
+	free_high_pages((void *)l1_mem, 2);
+	return ret;
 }
 
 static int hbootctrl_open(struct inode *inode, struct file *file);
@@ -494,5 +499,12 @@ int __init hbootmod_init(void)
 	return 0;
 }
 
+static void __exit hbootmod_exit(void)
+{
+	unregister_chrdev(dev_major, CTRL_DEVNAME);
+	buffers_destroy();
+}
+
 module_init(hbootmod_init);
+module_exit(hbootmod_exit);
 MODULE_LICENSE("GPL");

@@ -26,8 +26,12 @@ def function(text, signature):
 
 helpers = function((source / 'hboot.c').read_text(),
                    'static int disable_dss(void)')
-helpers += '\n' + function((source / 'emu_uart.c').read_text(),
-                           'int hboot_activate_emu_uart(void)')
+routing = (source / 'emu_uart.c').read_text()
+for signature in ('static void write_omap_mux_register(u16 offset, u8 mode, u8 input_en)',
+                  'void hboot_finish_emu_uart(struct hboot_uart_route *route, int keep)',
+                  'int hboot_activate_emu_uart(struct hboot_uart_route *route)'):
+    helpers += '\n' + function(routing, signature)
+route_header = (source / 'emu_uart.h').read_text()
 helpers += '\n' + function((source / 'hboot.c').read_text(),
                            'static int find_my_dev(struct device *dev, void *data)')
 helpers += '\n' + function((source / 'emu_uart.c').read_text(),
@@ -41,6 +45,9 @@ preamble = r'''
 #include <sys/mman.h>
 #include <unistd.h>
 typedef unsigned short u16;
+typedef unsigned char u8;
+typedef unsigned int u32;
+#define OMAP343X_CTRL_BASE 0x1000
 typedef struct { int event; } pm_message_t;
 struct device_driver { const char *name; };
 struct device {
@@ -65,7 +72,7 @@ static struct {
 } *devices;
 static size_t page_size;
 static int found, uart, live, acquired, released, suspend_result;
-static int events[32], event_count;
+static int events[40], event_count;
 static int fail_transaction, transaction_count, warnings;
 enum { LOOKUP = 1, SUSPEND_ENTER, SUSPEND_EXIT, READ, WRITE, MUX, PUT };
 #define KERN_INFO ""
@@ -83,7 +90,7 @@ static void mock_printk(const char *message, ...)
     ((struct platform_device *)((char *)(p) - offsetof(struct platform_device, dev)))
 static void record(int event)
 {
-    assert(event_count < 32);
+    assert(event_count < 40);
     events[event_count++] = event;
 }
 static const char *dev_name(struct device *dev) { return dev->name; }
@@ -120,43 +127,42 @@ static int suspend_device(struct platform_device *dev, pm_message_t message)
     record(SUSPEND_EXIT);
     return suspend_result;
 }
+static u16 cpcap_897, cpcap_411, pads[HBOOT_ULPI_PADS + 1];
 static int cpcap_config_for_read(struct spi_device *spi, unsigned short reg,
                                  unsigned short *value)
 {
-    assert(live && spi == &devices->spi && reg == 18 && event_count == 1);
+    assert(live && spi == &devices->spi);
+    assert(reg == (transaction_count == 0 ? 18 : transaction_count == 1 ? 897 : 411));
     record(READ);
-    ++transaction_count;
-    if (fail_transaction == transaction_count) return -5;
-    *value = 0x1234;
+    if (fail_transaction == ++transaction_count) return -EIO;
+    *value = reg == 18 ? 0x1234 : reg == 897 ? cpcap_897 : cpcap_411;
     return 0;
 }
 static int cpcap_config_for_write(struct spi_device *spi, unsigned short reg,
                                   unsigned short value)
 {
     assert(live && spi == &devices->spi);
-    if (event_count == 14) assert(reg == 897 && value == 0x0101);
-    else { assert(event_count == 15); assert(reg == 411 && value == 0x014C); }
     record(WRITE);
-    ++transaction_count;
-    return fail_transaction == transaction_count ?
-           (transaction_count == 2 ? -110 : -121) : 0;
+    /* Model a write that reaches the device before the SPI error arrives. */
+    if (reg == 897) cpcap_897 = value;
+    else { assert(reg == 411); cpcap_411 = value; }
+    if (fail_transaction == ++transaction_count) return -EIO;
+    return 0;
 }
-static void write_omap_mux_register(u16 offset, unsigned char mode,
-                                     unsigned char input_en)
+static u16 *mux_pad(u32 address)
 {
     assert(live);
-    if (event_count < 14) {
-        assert(event_count >= 2);
-        assert(offset == 0x1A2 + (event_count - 2) * 2);
-        assert(mode == 7 && input_en == 0);
-    } else if (event_count == 16) {
-        assert(offset == 0x19E && mode == 7 && input_en == 0);
-    } else if (event_count == 17) {
-        assert(offset == 0x1AA && mode == 2 && input_en == 0);
-    } else {
-        assert(event_count == 18);
-        assert(offset == 0x1AC && mode == 2 && input_en == 1);
-    }
+    assert(address == OMAP343X_CTRL_BASE + 0x19e ||
+           (address >= OMAP343X_CTRL_BASE + 0x1a2 &&
+            address < OMAP343X_CTRL_BASE + 0x1a2 + 2 * HBOOT_ULPI_PADS &&
+            !(address & 1)));
+    return &pads[address == OMAP343X_CTRL_BASE + 0x19e ? HBOOT_ULPI_PADS :
+                 (address - OMAP343X_CTRL_BASE - 0x1a2) / 2];
+}
+static u16 omap_readw(u32 address) { return *mux_pad(address); }
+static void omap_writew(u16 value, u32 address)
+{
+    *mux_pad(address) = value;
     record(MUX);
 }
 '''
@@ -165,7 +171,9 @@ static void named_scenario(int is_uart, int lookup, int driver, int callback,
                            int data, int result, int spi, int failure,
                            const char *name)
 {
-    int expected[32], count = 0, i, status = 0;
+    int expected[40], count = 0, i, status = 0;
+    struct hboot_uart_route route;
+    int keep = result == 0;
     int before_acquired = acquired, before_released = released;
     assert(!live && acquired == released);
     assert(!mprotect(devices, page_size, PROT_READ | PROT_WRITE));
@@ -176,20 +184,28 @@ static void named_scenario(int is_uart, int lookup, int driver, int callback,
     devices->driver.suspend = callback ? suspend_device : NULL;
     devices->uart.platform_data = data ? &devices->data : NULL;
     devices->data.spi = spi ? &devices->spi : NULL;
+    cpcap_897 = 0x4321; cpcap_411 = 0xabcd;
+    for (i = 0; i <= HBOOT_ULPI_PADS; ++i) pads[i] = 0x4200 + i;
     fail_transaction = failure; transaction_count = warnings = 0;
     /* Expected lookup outcome is independent of the production callback. */
     lookup = lookup && !strcmp(name, uart ? "cpcap_usb" : "omapdss");
     expected[count++] = LOOKUP;
     if (lookup) {
         if (uart && data && spi) {
-            expected[count++] = READ;
-            if (failure != 1) {
-                for (i = 0; i < 12; ++i) expected[count++] = MUX;
+            for (i = 1; i <= 3; ++i) {
+                expected[count++] = READ;
+                if (failure == i) break;
+            }
+            if (!failure || failure >= 4) {
+                for (i = 0; i < HBOOT_ULPI_PADS; ++i) expected[count++] = MUX;
                 expected[count++] = WRITE;
-                if (failure != 2) {
+                if (failure != 4) expected[count++] = WRITE;
+                if (!failure)
+                    for (i = 0; i < 3; ++i) expected[count++] = MUX;
+                if (failure || !keep) {
+                    if (failure != 4) expected[count++] = WRITE;
                     expected[count++] = WRITE;
-                    if (failure != 3)
-                        for (i = 0; i < 3; ++i) expected[count++] = MUX;
+                    for (i = 0; i <= HBOOT_ULPI_PADS; ++i) expected[count++] = MUX;
                 }
             }
         } else if (!uart && driver && callback) {
@@ -200,9 +216,23 @@ static void named_scenario(int is_uart, int lookup, int driver, int callback,
     }
     if (uart) {
         if (!lookup || !data || !spi) status = -ENODEV;
-        else if (failure) status = failure == 1 ? -5 : failure == 2 ? -110 : -121;
-        assert(hboot_activate_emu_uart() == status);
-        assert(warnings == (status == 0));
+        else if (failure) status = -EIO;
+        assert(hboot_activate_emu_uart(&route) == status);
+        if (!status) {
+            assert(live && released == before_released);
+            hboot_finish_emu_uart(&route, keep);
+        }
+        assert(warnings == (!status && keep));
+        if (!status && keep) {
+            assert(cpcap_897 == 0x0101 && cpcap_411 == 0x014c);
+            for (i = 0; i <= HBOOT_ULPI_PADS; ++i) {
+                u16 expected_mux = i == 4 ? 0x1a : i == 5 ? 0x11a : 0x1f;
+                assert(pads[i] == (0x4200 | expected_mux));
+            }
+        } else {
+            assert(cpcap_897 == 0x4321 && cpcap_411 == 0xabcd);
+            for (i = 0; i <= HBOOT_ULPI_PADS; ++i) assert(pads[i] == 0x4200 + i);
+        }
     } else {
         if (!lookup || !driver) status = -ENODEV;
         else if (!callback) status = -EOPNOTSUPP;
@@ -251,9 +281,12 @@ int main(void)
         scenario(1, 1, 0, 0, 1, 0, 1, 1);
         scenario(1, 1, 0, 0, 1, 0, 1, 2);
         scenario(1, 1, 0, 0, 1, 0, 1, 3);
+        scenario(1, 1, 0, 0, 1, 0, 1, 4);
+        scenario(1, 1, 0, 0, 1, 0, 1, 5);
+        scenario(1, 1, 0, 0, 1, -EIO, 1, 0);
         scenario(1, 1, 0, 0, 1, 0, 1, 0);
     }
-    assert(acquired == 1300 && released == 1300);
+    assert(acquired == 1600 && released == 1600);
     assert(!munmap(devices, page_size));
     puts("hbootmod preparation device-reference checks passed");
     return 0;
@@ -262,7 +295,7 @@ int main(void)
 with tempfile.TemporaryDirectory(prefix='hbootmod-device-refs-') as directory:
     test_source = Path(directory) / 'device_refs.c'
     executable = Path(directory) / 'device_refs'
-    test_source.write_text(preamble + helpers + tests)
+    test_source.write_text(route_header + preamble + helpers + tests)
     subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu89', '-Wall', '-Wextra',
                     '-Werror', str(test_source), '-o', str(executable)],
                    check=True, timeout=60)

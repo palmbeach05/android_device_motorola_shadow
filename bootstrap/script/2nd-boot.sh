@@ -134,6 +134,14 @@ echo "2nd-boot: preparation complete; unmounting filesystems"
 
 cd "$BOOT_DIR" || fail "Cannot enter $BOOT_DIR"
 
+# Module parameters are fixed at insertion. Drop any idle module from a
+# failed handoff so retries start with fresh buffers and the requested mode.
+LOADED=$("$BB_STATIC" awk '$1 == "hbootmod" { loaded = 1 }
+    END { print loaded ? 1 : 0 }' /proc/modules) || fail "Cannot inspect loaded modules"
+if [ "$LOADED" = 1 ]; then
+    "$BB_STATIC" rmmod hbootmod || fail "Cannot unload previous hbootmod"
+fi
+
 # No argument selects normal boot; recovery selects recovery.
 # uart selects normal boot with emu_uart=115200; UART recovery is not a combined mode.
 "$BB_STATIC" echo "Inserting hbootmod..."

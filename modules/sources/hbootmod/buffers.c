@@ -593,6 +593,14 @@ int buffers_init(void)
 
 void buffers_destroy(void)
 {
-	if (buffers.bootlist)
+	int handle;
+
+	for (handle = 0; handle < buffers.used; ++handle)
+		free_buffer(handle);
+	buffers.used = 0;
+	buffers.handle = INVALID_BUFFER_HANDLE;
+	if (buffers.bootlist) {
 		free_high_mem(buffers.bootlist);
+		buffers.bootlist = NULL;
+	}
 }
