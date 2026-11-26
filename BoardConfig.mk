@@ -123,7 +123,6 @@ TARGET_SYSTEMIMAGE_USE_SQUISHER				:= true
 # --- Recovery & TWRP ---
 RECOVERY_VARIANT							:= twrp
 RECOVERY_BOOTABLE_PATH						:= bootable/recovery-twrp
-TARGET_RECOVERY_UI_LIB						:= librecovery_ui_default
 TARGET_RECOVERY_FSTAB						:= $(DEVICE_PATH)/recovery/twrp.fstab
 RECOVERY_FSTAB_VERSION						:= 2
 TARGET_RECOVERY_INITRC						:= $(DEVICE_PATH)/ramdisk/init.recovery.shadow.rc
