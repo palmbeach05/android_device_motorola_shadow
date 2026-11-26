@@ -102,8 +102,8 @@ PRODUCT_PREBUILT_WEBVIEWCHROMIUM			:= no
 TARGET_FORCE_CPU_TYPE						:= true
 
 BOARD_VOLD_EMMC_SHARES_DEV_MAJOR			:= true
-BOARD_UMS_LUNFILE							:= "/sys/class/android_usb/f_mass_storage/lun/file"
-TARGET_USE_CUSTOM_LUN_FILE_PATH				:= "/sys/class/android_usb/f_mass_storage/lun/file"
+BOARD_UMS_LUNFILE							:= "/sys/devices/android_usb/android0/f_mass_storage/lun/file"
+TARGET_USE_CUSTOM_LUN_FILE_PATH				:= "/sys/devices/android_usb/android0/f_mass_storage/lun/file"
 BOARD_HARDWARE_CLASS						:= $(DEVICE_PATH)/cmhw/
 
 USE_OPENGL_RENDERER							:= true
@@ -131,10 +131,6 @@ BOARD_HAS_LARGE_FILESYSTEM					:= true
 TW_THEME									:= portrait_hdpi
 RECOVERY_GRAPHICS_USE_LINELENGTH			:= true
 TARGET_RECOVERY_PIXEL_FORMAT				:= "BGRA_8888"
-TW_EXCLUDE_MTP								:= true
-TW_NO_USB_STORAGE							:= true
-TW_INTERNAL_STORAGE_PATH					:= "/data"
-TW_INTERNAL_STORAGE_MOUNT_POINT				:= "data"
 TW_EXTERNAL_STORAGE_PATH					:= "/external_sd"
 TW_EXTERNAL_STORAGE_MOUNT_POINT				:= "external_sd"
 TW_CUSTOM_POWER_BUTTON						:= 107
